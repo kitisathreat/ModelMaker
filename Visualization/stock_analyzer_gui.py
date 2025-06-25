@@ -18,6 +18,8 @@ import requests
 import json
 from datetime import datetime
 from typing import Dict, Optional, List, Tuple
+import numpy as np
+from PyQt5.QtWidgets import QSizePolicy
 
 # Add the Data Sourcing directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Data Sourcing'))
@@ -27,9 +29,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTextEdit, QTabWidget, QTableWidget, QTableWidgetItem,
                              QProgressBar, QMessageBox, QSplitter, QFrame,
                              QHeaderView, QComboBox, QGroupBox, QGridLayout,
-                             QListWidget, QListWidgetItem, QScrollArea, QFileDialog)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap, QIcon
+                             QListWidget, QListWidgetItem, QScrollArea, QFileDialog,
+                             QCheckBox)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation, QEasingCurve, QPoint
+from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap, QIcon, QPainter, QBrush, QPainterPath, QLinearGradient
 
 from sec_file_sourcer import SECFileSourcer
 
@@ -321,44 +324,146 @@ class AnalysisWorker(QThread):
     progress_updated = pyqtSignal(str)
     analysis_complete = pyqtSignal(dict, dict, str, str)  # Added file_path
     error_occurred = pyqtSignal(str)
+    preview_ready = pyqtSignal(str)  # New signal for preview
     
-    def __init__(self, ticker: str, quarters: int):
+    def __init__(self, ticker: str, quarters: int, schmoove_mode: bool = False, enhanced_fuzzy_matching: bool = True):
         super().__init__()
         self.ticker = ticker
         self.quarters = quarters
+        self.schmoove_mode = schmoove_mode
+        self.enhanced_fuzzy_matching = enhanced_fuzzy_matching
         self.sourcer = SECFileSourcer()
     
     def run(self):
         """Run the financial analysis."""
         try:
+            import time
+            start_time = time.time()
+            
+            self.progress_updated.emit(f"Starting financial analysis for {self.ticker}...")
+            self.progress_updated.emit(f"Analysis period: {self.quarters} quarters")
+            if self.schmoove_mode:
+                self.progress_updated.emit("Schmoove mode: ENABLED (enhanced performance)")
+            if self.enhanced_fuzzy_matching:
+                self.progress_updated.emit("Enhanced fuzzy matching: ENABLED (includes non-GAAP to GAAP mapping)")
+            else:
+                self.progress_updated.emit("Enhanced fuzzy matching: DISABLED (standard GAAP matching only)")
+            
+            self.progress_updated.emit("📊 Using standard three-statement financial modeling principles")
+            
+            # Provide helpful information about what to expect
+            if self.quarters > 12:
+                self.progress_updated.emit("⚠️  This is a large analysis - it may take several minutes to complete.")
+            elif self.quarters > 8:
+                self.progress_updated.emit("ℹ️  This analysis will process multiple years of data - please be patient.")
+            else:
+                self.progress_updated.emit("ℹ️  Analysis in progress - this typically takes 30-60 seconds.")
+            
+            self.progress_updated.emit("")
+            
             # Step 1: Find SEC filings
-            self.progress_updated.emit("Finding SEC filings...")
+            step_start = time.time()
+            self.progress_updated.emit("Step 1/4: Finding SEC filings...")
+            self.progress_updated.emit("  • Converting ticker to CIK number...")
             filings = self.sourcer.find_sec_filings(self.ticker, filing_types=['10-K', '10-Q'])
             
             if filings.empty:
                 self.error_occurred.emit(f"No filings found for {self.ticker}. Please check the ticker symbol.")
                 return
             
-            self.progress_updated.emit(f"Found {len(filings)} filings. Creating financial model...")
+            step_time = time.time() - step_start
+            self.progress_updated.emit(f"  ✓ Found {len(filings)} SEC filings (took {step_time:.1f}s)")
             
             # Step 2: Create financial model with specified quarters
-            financial_model = self.sourcer.create_financial_model(self.ticker, quarters=self.quarters)
+            step_start = time.time()
+            self.progress_updated.emit("Step 2/4: Creating financial model...")
+            self.progress_updated.emit("  • Analyzing filing structure and data availability...")
             
-            self.progress_updated.emit("Creating sensitivity analysis...")
+            # Calculate expected processing time based on quarters
+            years_needed = max(1, (self.quarters + 3) // 4)
+            k_filings_needed = years_needed
+            q_filings_needed = min(self.quarters, 20)
+            
+            self.progress_updated.emit(f"  • Processing {k_filings_needed} 10-K filings and {q_filings_needed} 10-Q filings...")
+            self.progress_updated.emit("  • Extracting XBRL financial data...")
+            
+            # Pass progress callback to create_financial_model
+            financial_model = self.sourcer.create_financial_model(
+                self.ticker, 
+                quarters=self.quarters, 
+                progress_callback=self.progress_updated.emit,
+                enhanced_fuzzy_matching=self.enhanced_fuzzy_matching
+            )
+            
+            # Check what data was successfully extracted
+            data_points = sum(len(df) for df in financial_model.values() if not df.empty)
+            step_time = time.time() - step_start
+            self.progress_updated.emit(f"  ✓ Financial model created with {data_points} data points (took {step_time:.1f}s)")
             
             # Step 3: Create sensitivity analysis
-            sensitivity_model = self.sourcer.create_sensitivity_model(financial_model, self.ticker, quarters=self.quarters)
+            step_start = time.time()
+            self.progress_updated.emit("Step 3/4: Creating sensitivity analysis...")
+            self.progress_updated.emit("  • Analyzing operating leverage scenarios...")
             
-            self.progress_updated.emit("Exporting to Excel...")
+            # Pass progress callback to create_sensitivity_model
+            sensitivity_model = self.sourcer.create_sensitivity_model(
+                financial_model, 
+                self.ticker, 
+                quarters=self.quarters,
+                progress_callback=self.progress_updated.emit
+            )
             
-            # Step 4: Export to Excel with fast mode to prevent hanging
-            excel_file = self.sourcer.export_to_excel(financial_model, sensitivity_model, self.ticker)
+            self.progress_updated.emit("  • Generating KPI summary and enhanced financial model...")
+            step_time = time.time() - step_start
+            self.progress_updated.emit(f"  ✓ Sensitivity analysis completed (took {step_time:.1f}s)")
             
-            self.progress_updated.emit("Analysis complete!")
+            # Step 4: Export to Excel (preview first, then final)
+            step_start = time.time()
+            self.progress_updated.emit("Step 4/4: Exporting to Excel...")
+            self.progress_updated.emit("  • Creating preview file for immediate display...")
+            
+            import os
+            from datetime import datetime
+            preview_filename = f"preview_{self.ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            preview_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage', preview_filename)
+            
+            # Pass progress callback to export_to_excel
+            self.sourcer.export_to_excel(
+                financial_model, 
+                sensitivity_model, 
+                self.ticker, 
+                filename=preview_filename, 
+                schmoove_mode=self.schmoove_mode,
+                progress_callback=self.progress_updated.emit
+            )
+            self.preview_ready.emit(preview_path)
+            
+            self.progress_updated.emit("  • Creating final Excel file with professional formatting...")
+            excel_file = self.sourcer.export_to_excel(
+                financial_model, 
+                sensitivity_model, 
+                self.ticker, 
+                schmoove_mode=self.schmoove_mode,
+                progress_callback=self.progress_updated.emit
+            )
+            
+            step_time = time.time() - step_start
+            self.progress_updated.emit(f"  ✓ Excel export completed (took {step_time:.1f}s)")
+            
+            total_time = time.time() - start_time
+            self.progress_updated.emit("")
+            self.progress_updated.emit(f"🎉 Analysis complete! Total time: {total_time:.1f}s")
+            self.progress_updated.emit(f"📊 Results available in {len(financial_model)} financial statements and {len(sensitivity_model)} analysis sheets")
             
             # Emit results
             self.analysis_complete.emit(financial_model, sensitivity_model, self.ticker, excel_file)
             
+            # Optionally clean up preview file
+            try:
+                if os.path.exists(preview_path):
+                    os.remove(preview_path)
+            except Exception:
+                pass
         except Exception as e:
             self.error_occurred.emit(f"Error during analysis: {str(e)}")
 
@@ -437,6 +542,147 @@ class SpreadsheetTab(QWidget):
         self.table.horizontalHeader().setFont(header_font)
         self.table.verticalHeader().setFont(header_font)
 
+class WavyLabel(QWidget):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.letters = []
+        self.animations = []
+        self.base_y = 0
+        self.text = text
+        
+        # Set size policy to allow expansion and prevent shrinking
+        self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Preferred)
+        
+        layout = QHBoxLayout(self)
+        layout.setSpacing(24)  # We'll use fixed width for spacing
+        layout.setContentsMargins(0, 10, 10, 10)
+        font = QFont("Consolas", 36, QFont.Bold)
+        
+        for i, char in enumerate(text):
+            lbl = QLabel(char)
+            lbl.setFont(font)
+            lbl.setStyleSheet("color: #4CAF50;")
+            lbl.setFixedWidth(36)
+            lbl.setAlignment(Qt.AlignCenter)
+            layout.addWidget(lbl)
+            self.letters.append(lbl)
+            anim = QPropertyAnimation(lbl, b"pos", self)
+            anim.setDuration(1200)
+            anim.setLoopCount(-1)
+            anim.setEasingCurve(QEasingCurve.InOutSine)
+            phase = (i / max(1, len(text)-1))
+            anim.setKeyValueAt(0, QPoint(lbl.x(), 0))
+            anim.setKeyValueAt(0.2, QPoint(lbl.x(), -6 * (0.5 + 0.5 * np.sin(2 * np.pi * phase))))
+            anim.setKeyValueAt(0.5, QPoint(lbl.x(), -12 * (0.5 + 0.5 * np.sin(2 * np.pi * phase + np.pi))))
+            anim.setKeyValueAt(0.8, QPoint(lbl.x(), -6 * (0.5 + 0.5 * np.sin(2 * np.pi * phase))))
+            anim.setKeyValueAt(1, QPoint(lbl.x(), 0))
+            self.animations.append(anim)
+        
+        # Calculate and set minimum width to ensure all letters fit
+        min_width = len(text) * (36 + 24) + 20  # letter width + spacing + margins
+        self.setMinimumWidth(min_width)
+        self.setFixedHeight(60)  # Set a fixed height to prevent vertical issues
+        
+        # Force the widget to be at least the minimum width
+        self.resize(min_width, 60)
+        
+        # Add a timer to periodically check size
+        self.size_timer = QTimer(self)
+        self.size_timer.timeout.connect(self.enforce_minimum_size)
+        self.size_timer.start(100)  # Check every 100ms
+        
+        self.start_wave()
+    
+    def enforce_minimum_size(self):
+        """Enforce minimum size to prevent collapsing."""
+        min_width = len(self.text) * (36 + 24) + 20
+        if self.width() < min_width:
+            self.setFixedWidth(min_width)
+    
+    def start_wave(self):
+        for anim in self.animations:
+            anim.start()
+    
+    def showEvent(self, event):
+        """Ensure proper sizing when widget is shown."""
+        super().showEvent(event)
+        self.updateGeometry()
+        self.adjustSize()
+    
+    def resizeEvent(self, event):
+        """Ensure the widget maintains its proper size."""
+        super().resizeEvent(event)
+        # Force the minimum width
+        min_width = len(self.text) * (36 + 24) + 20
+        if self.width() < min_width:
+            self.setFixedWidth(min_width)
+
+class FlamesWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(80)
+        self.t = 0
+        self.cpu_percent = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.animate)
+        self.timer.start(60)
+        self.setVisible(False)
+        try:
+            import psutil
+            self.psutil = psutil
+        except ImportError:
+            self.psutil = None
+        self.rng = np.random.default_rng()
+        self.flame_seeds = [self.rng.integers(0, 10000) for _ in range(20)]
+    def animate(self):
+        self.t += 1
+        if self.psutil:
+            self.cpu_percent = self.psutil.cpu_percent(interval=None)
+        else:
+            self.cpu_percent = 0
+        self.update()
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        w = self.width()
+        h = self.height()
+        n_flames = 12
+        scale = 0.5 + 1.5 * (self.cpu_percent / 100.0)
+        for i in range(n_flames):
+            x = int(w * (i + 0.5) / n_flames)
+            base = h - 10
+            # Multi-spike flame
+            n_spikes = self.rng.integers(2, 5)
+            spike_offsets = np.linspace(-10, 10, n_spikes)
+            spike_heights = [scale * (38 + 18 * np.sin(self.t/3 + i + s + np.sin(self.t/7 + i))) for s in spike_offsets]
+            tip_wiggles = [8 * np.sin(self.t/5 + i + s) for s in spike_offsets]
+            path = QPainterPath()
+            path.moveTo(x, base)
+            # Blue/white core at base
+            grad_core = QLinearGradient(x, base, x, base-10)
+            grad_core.setColorAt(0, QColor(80, 180, 255))
+            grad_core.setColorAt(1, QColor(255, 255, 255))
+            painter.setBrush(QBrush(grad_core))
+            painter.setPen(Qt.NoPen)
+            painter.drawEllipse(x-6, base-10, 12, 12)
+            # Main flame path
+            path.lineTo(x-10, base-10)
+            for j, (dx, h_spike, wiggle) in enumerate(zip(spike_offsets, spike_heights, tip_wiggles)):
+                px = x + dx
+                py = base - h_spike + wiggle
+                path.lineTo(px, py)
+            path.lineTo(x+10, base-10)
+            path.lineTo(x, base)
+            grad = QLinearGradient(x, base, x, base-max(spike_heights))
+            grad.setColorAt(0, QColor(255, 255, 180))
+            grad.setColorAt(0.2, QColor(255, 220, 40))
+            grad.setColorAt(0.6, QColor(255, 140, 0))
+            grad.setColorAt(1, QColor(255, 60, 0))
+            painter.setBrush(QBrush(grad))
+            painter.setPen(Qt.NoPen)
+            painter.drawPath(path)
+        painter.end()
+
 class StockAnalyzerGUI(QMainWindow):
     """Main application window for the Stock Analyzer."""
     
@@ -470,6 +716,10 @@ class StockAnalyzerGUI(QMainWindow):
         
         # Results section with splitter
         self.create_results_section(main_layout)
+        
+        # Add flames widget at the bottom
+        self.flames = FlamesWidget()
+        main_layout.addWidget(self.flames)
         
         # Status bar
         self.statusBar().showMessage("Ready to analyze stocks")
@@ -532,12 +782,48 @@ class StockAnalyzerGUI(QMainWindow):
         self.warning_label.setWordWrap(True)
         input_layout.addWidget(self.warning_label, 3, 1)
         
+        # Schmoove Mode Checkbox
+        schmoove_layout = QHBoxLayout()
+        self.schmoove_checkbox = QCheckBox()
+        self.schmoove_checkbox.setChecked(False)
+        self.schmoove_label = WavyLabel("Schmoove Mode")
+        
+        # Add widgets with proper spacing
+        schmoove_layout.addWidget(self.schmoove_checkbox)
+        schmoove_layout.addSpacing(20)  # Fixed spacing instead of stretch
+        schmoove_layout.addWidget(self.schmoove_label, 1)  # Give it stretch factor of 1
+        schmoove_layout.addStretch()  # Only one stretch at the end
+        
+        input_layout.addLayout(schmoove_layout, 5, 0, 1, 2)
+        
+        # Enhanced Fuzzy Matching Checkbox
+        fuzzy_layout = QHBoxLayout()
+        self.fuzzy_checkbox = QCheckBox()
+        self.fuzzy_checkbox.setChecked(True)  # Default to enabled
+        fuzzy_label = QLabel("🔍 Enhanced Fuzzy Matching")
+        fuzzy_label.setStyleSheet("font-weight: bold; color: #2E86AB; font-size: 11px;")
+        
+        # Add tooltip for explanation
+        fuzzy_tooltip = ("When enabled, includes non-GAAP to GAAP mapping for better data coverage.\n"
+                        "When disabled, uses only standard fuzzy matching for exact GAAP concepts.\n\n"
+                        "Enhanced mode may find more data but could include less precise matches.")
+        fuzzy_label.setToolTip(fuzzy_tooltip)
+        self.fuzzy_checkbox.setToolTip(fuzzy_tooltip)
+        
+        # Add widgets with proper spacing
+        fuzzy_layout.addWidget(self.fuzzy_checkbox)
+        fuzzy_layout.addSpacing(20)  # Fixed spacing instead of stretch
+        fuzzy_layout.addWidget(fuzzy_label, 1)  # Give it stretch factor of 1
+        fuzzy_layout.addStretch()  # Only one stretch at the end
+        
+        input_layout.addLayout(fuzzy_layout, 6, 0, 1, 2)
+        
         # Analysis button
         self.analyze_button = QPushButton("Analyze Stock")
         self.analyze_button.clicked.connect(self.start_analysis)
         self.analyze_button.setMinimumHeight(40)
         
-        input_layout.addWidget(self.analyze_button, 4, 0, 1, 2)
+        input_layout.addWidget(self.analyze_button, 7, 0, 1, 2)
         
         input_group.setLayout(input_layout)
         parent_layout.addWidget(input_group)
@@ -725,11 +1011,15 @@ class StockAnalyzerGUI(QMainWindow):
             return
         
         quarters = self.get_quarters_from_period()
+        schmoove_mode = self.schmoove_checkbox.isChecked()
+        enhanced_fuzzy_matching = self.fuzzy_checkbox.isChecked()
         
         # Disable input during analysis
         self.ticker_input.setEnabled(False)
         self.years_input.setEnabled(False)
         self.quarters_input.setEnabled(False)
+        self.schmoove_checkbox.setEnabled(False)
+        self.fuzzy_checkbox.setEnabled(False)
         self.analyze_button.setEnabled(False)
         
         # Show progress
@@ -738,11 +1028,15 @@ class StockAnalyzerGUI(QMainWindow):
         self.status_text.setVisible(True)
         self.status_text.clear()
         
+        # Show flames if schmoove mode
+        self.flames.setVisible(schmoove_mode)
+        
         # Create and start worker thread
-        self.worker = AnalysisWorker(ticker, quarters)
+        self.worker = AnalysisWorker(ticker, quarters, schmoove_mode=schmoove_mode, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.analysis_complete.connect(self.handle_analysis_complete)
         self.worker.error_occurred.connect(self.handle_analysis_error)
+        self.worker.preview_ready.connect(self.handle_preview_ready)  # Connect new signal
         self.worker.start()
     
     def update_progress(self, message: str):
@@ -761,10 +1055,15 @@ class StockAnalyzerGUI(QMainWindow):
         self.ticker_input.setEnabled(True)
         self.years_input.setEnabled(True)
         self.quarters_input.setEnabled(True)
+        self.schmoove_checkbox.setEnabled(True)
+        self.fuzzy_checkbox.setEnabled(True)
         self.analyze_button.setEnabled(True)
         
         # Hide progress
         self.progress_bar.setVisible(False)
+        
+        # Hide flames
+        self.flames.setVisible(False)
         
         # Display results
         self.display_results()
@@ -777,14 +1076,25 @@ class StockAnalyzerGUI(QMainWindow):
         self.ticker_input.setEnabled(True)
         self.years_input.setEnabled(True)
         self.quarters_input.setEnabled(True)
+        self.schmoove_checkbox.setEnabled(True)
+        self.fuzzy_checkbox.setEnabled(True)
         self.analyze_button.setEnabled(True)
         
         # Hide progress
         self.progress_bar.setVisible(False)
         
+        # Hide flames
+        self.flames.setVisible(False)
+        
         # Show error message
         QMessageBox.critical(self, "Analysis Error", error_message)
         self.statusBar().showMessage("Analysis failed")
+    
+    def handle_preview_ready(self, preview_path):
+        """Handle preview Excel file ready for visualization."""
+        if os.path.exists(preview_path):
+            self.excel_viewer.load_excel_file(preview_path)
+            self.excel_viewer.setVisible(True)
     
     def display_results(self):
         """Display analysis results in tabs and Excel viewer."""
