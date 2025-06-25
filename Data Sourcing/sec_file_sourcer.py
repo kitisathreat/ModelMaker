@@ -18,16 +18,86 @@ class SECFileSourcer:
     4. Create KPI summary sheets
     """
     
+    # Class-level cache for ticker-to-CIK mapping
+    _ticker_cik_cache = None
+    _cache_last_updated = None
+    _cache_expiry_seconds = 24 * 3600  # 24 hours
+    
     def __init__(self):
         """Initialize the SEC File Sourcer with base URLs and headers."""
         self.base_url = "https://data.sec.gov/api"
+        self.sec_ticker_url = "https://www.sec.gov/files/company_tickers.json"
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
+            'User-Agent': 'ModelMaker/1.0 (kit.kumar@gmail.com)',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Host': 'www.sec.gov'
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
         
+        # Add rate limiting - SEC requires delays between requests
+        self.last_request_time = 0
+        self.min_request_interval = 0.1  # 100ms minimum between requests
+        
+    def _rate_limit(self):
+        """Ensure minimum time between API requests to comply with SEC rate limits."""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.min_request_interval:
+            time.sleep(self.min_request_interval - time_since_last)
+        self.last_request_time = time.time()
+
+    @classmethod
+    def _is_cache_valid(cls):
+        if cls._ticker_cik_cache is None or cls._cache_last_updated is None:
+            return False
+        return (time.time() - cls._cache_last_updated) < cls._cache_expiry_seconds
+
+    @classmethod
+    def _load_ticker_cik_cache(cls, session, url):
+        """Load the ticker-to-CIK mapping from the SEC and cache it."""
+        try:
+            response = session.get(url)
+            if response.status_code != 200:
+                print(f"Error fetching company tickers: {response.status_code}")
+                return None
+            data = response.json()
+            # Build a case-insensitive mapping
+            cache = {info['ticker'].upper(): cik.zfill(10) for cik, info in data.items() if 'ticker' in info}
+            cls._ticker_cik_cache = cache
+            cls._cache_last_updated = time.time()
+            return cache
+        except Exception as e:
+            print(f"Error loading ticker-to-CIK cache: {e}")
+            return None
+
+    def get_cik_from_ticker(self, ticker: str, force_refresh: bool = False) -> Optional[str]:
+        """
+        Convert a stock ticker symbol to its corresponding CIK (Central Index Key) number.
+        Uses a cached mapping for efficiency.
+        Args:
+            ticker (str): Stock ticker symbol (e.g., 'AAPL', 'MSFT')
+            force_refresh (bool): If True, refresh the cache from the SEC
+        Returns:
+            Optional[str]: CIK number as a string (10-digit zero-padded), or None if not found
+        """
+        ticker_upper = ticker.upper()
+        # Check cache
+        if force_refresh or not self._is_cache_valid():
+            self._rate_limit()
+            cache = self._load_ticker_cik_cache(self.session, self.sec_ticker_url)
+            if cache is None:
+                print("Could not fetch ticker-to-CIK mapping from SEC.")
+                return None
+        else:
+            cache = self._ticker_cik_cache
+        cik = cache.get(ticker_upper)
+        if cik:
+            return cik
+        print(f"Ticker '{ticker}' not found in SEC database.")
+        return None
+    
     def find_sec_filings(self, ticker: str, filing_types: List[str] = ['10-K', '10-Q']) -> pd.DataFrame:
         """
         Find SEC 10-K and 10-Q filings for a given stock ticker, sorted by date.
@@ -40,12 +110,18 @@ class SECFileSourcer:
             pd.DataFrame: DataFrame containing filing information sorted by date
         """
         try:
+            # Convert ticker to CIK
+            cik = self.get_cik_from_ticker(ticker)
+            if not cik:
+                print(f"Could not find CIK for ticker: {ticker}")
+                return pd.DataFrame()
+            
             # Get company submissions
-            submissions_url = f"{self.base_url}/submissions/CIK{ticker.zfill(10)}.json"
+            submissions_url = f"{self.base_url}/submissions/CIK{cik}.json"
             response = self.session.get(submissions_url)
             
             if response.status_code != 200:
-                print(f"Error fetching submissions for {ticker}: {response.status_code}")
+                print(f"Error fetching submissions for {ticker} (CIK: {cik}): {response.status_code}")
                 return pd.DataFrame()
             
             submissions_data = response.json()
@@ -96,12 +172,18 @@ class SECFileSourcer:
                 'quarterly_cash_flow': pd.DataFrame()
             }
             
+            # Convert ticker to CIK
+            cik = self.get_cik_from_ticker(ticker)
+            if not cik:
+                print(f"Could not find CIK for ticker: {ticker}")
+                return financial_model
+            
             # Get company facts
-            company_facts_url = f"{self.base_url}/xbrl/companyfacts/CIK{ticker.zfill(10)}.json"
+            company_facts_url = f"{self.base_url}/xbrl/companyfacts/CIK{cik}.json"
             response = self.session.get(company_facts_url)
             
             if response.status_code != 200:
-                print(f"Error fetching company facts for {ticker}")
+                print(f"Error fetching company facts for {ticker} (CIK: {cik})")
                 return financial_model
             
             facts_data = response.json()
