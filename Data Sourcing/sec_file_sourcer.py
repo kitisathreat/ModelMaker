@@ -748,6 +748,302 @@ class SECFileSourcer:
             print(f"Error in get_filing_content: {str(e)}")
             return ""
     
+    def export_to_excel_fast_preview(self, financial_model: Dict[str, pd.DataFrame], 
+                                   sensitivity_model: Dict[str, pd.DataFrame], 
+                                   ticker: str, filename: str, progress_callback=None) -> str:
+        """
+        Export financial models to Excel file with minimal formatting for fast preview generation.
+        This method skips the expensive professional formatting to provide quick results.
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        import pandas as pd
+        import os
+        from datetime import datetime
+        
+        progress("    • Creating fast preview Excel file...")
+        
+        # Ensure the Storage directory exists
+        storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
+        os.makedirs(storage_dir, exist_ok=True)
+        
+        filepath = os.path.join(storage_dir, filename)
+        
+        progress(f"    • Writing data to Excel: {filename}")
+
+        # Write all DataFrames to Excel using pandas (fast, no formatting)
+        progress("    • Writing financial data to Excel sheets...")
+        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            # Annual sheet
+            annual_income = financial_model.get('annual_income_statement', pd.DataFrame())
+            annual_balance = financial_model.get('annual_balance_sheet', pd.DataFrame())
+            annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
+            if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
+                progress("    • Writing annual financial statements...")
+                startrow = 0
+                if not annual_income.empty:
+                    annual_income.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                    startrow += annual_income.shape[1] + 3
+                if not annual_balance.empty:
+                    annual_balance.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                    startrow += annual_balance.shape[1] + 3
+                if not annual_cash_flow.empty:
+                    annual_cash_flow.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+            
+            # Quarterly sheet
+            quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
+            quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
+            quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
+            if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
+                progress("    • Writing quarterly financial statements...")
+                startrow = 0
+                if not quarterly_income.empty:
+                    quarterly_income.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                    startrow += quarterly_income.shape[1] + 3
+                if not quarterly_balance.empty:
+                    quarterly_balance.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                    startrow += quarterly_balance.shape[1] + 3
+                if not quarterly_cash_flow.empty:
+                    quarterly_cash_flow.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+            
+            # Sensitivity and summary sheets
+            progress("    • Writing sensitivity analysis and summary sheets...")
+            for sheet_name, df in sensitivity_model.items():
+                if not df.empty:
+                    df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
+            
+            # Summary sheet
+            summary_data = {
+                'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
+                'Value': [
+                    ticker,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    sum(len(df) for df in financial_model.values() if not df.empty),
+                    len(sensitivity_model.get('case_summary', pd.DataFrame()))
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, sheet_name='Summary', index=False)
+
+        progress(f"    ✓ Fast preview Excel file saved: {filepath}")
+        return filepath
+
+    def apply_excel_formatting(self, filepath: str, schmoove_mode: bool = False, progress_callback=None) -> str:
+        """
+        Apply professional formatting to an existing Excel file.
+        This can be used to upgrade a fast preview file to full formatting.
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        import os
+        
+        if not os.path.exists(filepath):
+            progress(f"    ✗ File not found: {filepath}")
+            return filepath
+        
+        progress("    • Applying professional formatting to existing Excel file...")
+        
+        if schmoove_mode:
+            try:
+                import joblib
+                import psutil
+                # Limit joblib to 75% of CPUs
+                n_jobs = max(1, int(psutil.cpu_count(logical=True) * 0.75))
+                progress(f"    • Schmoove mode enabled: Using {n_jobs} CPU cores")
+            except ImportError:
+                n_jobs = 1
+        else:
+            n_jobs = 1
+        
+        # Parent-child mapping for indentation following standard three-statement modeling
+        parent_map = {
+            # Income Statement - Standard format
+            'Revenue': None,  # Top level
+            'CostOfGoodsSold': 'Revenue',
+            'GrossProfit': None,  # Calculated total
+            
+            # Operating expenses
+            'ResearchAndDevelopmentExpense': 'OperatingExpenses',
+            'SellingGeneralAndAdministrativeExpense': 'OperatingExpenses',
+            'DepreciationAndAmortization': 'OperatingExpenses',
+            'StockBasedCompensationExpense': 'OperatingExpenses',
+            'RestructuringCharges': 'OperatingExpenses',
+            'ImpairmentCharges': 'OperatingExpenses',
+            'OtherOperatingExpenses': 'OperatingExpenses',
+            'OperatingExpenses': None,  # Subtotal
+            
+            'OperatingIncome': None,  # Total
+            
+            # Non-operating items
+            'InterestIncome': 'NonOperatingIncome',
+            'InterestExpense': 'NonOperatingIncome',
+            'GainLossOnSaleOfAssets': 'NonOperatingIncome',
+            'ForeignCurrencyGainLoss': 'NonOperatingIncome',
+            'OtherIncomeExpense': 'NonOperatingIncome',
+            'NonOperatingIncome': None,  # Subtotal
+            
+            'IncomeBeforeTaxes': None,  # Total
+            'IncomeTaxExpense': 'IncomeBeforeTaxes',
+            'NetIncome': None,  # Final total
+            
+            # Earnings per share
+            'EarningsPerShareBasic': 'NetIncome',
+            'EarningsPerShareDiluted': 'NetIncome',
+            'WeightedAverageSharesBasic': 'NetIncome',
+            'WeightedAverageSharesDiluted': 'NetIncome',
+            
+            # Balance Sheet - Standard format: Assets = Liabilities + Equity
+            # Current Assets
+            'CashAndCashEquivalents': 'CurrentAssets',
+            'ShortTermInvestments': 'CurrentAssets',
+            'AccountsReceivable': 'CurrentAssets',
+            'Inventory': 'CurrentAssets',
+            'PrepaidExpenses': 'CurrentAssets',
+            'OtherCurrentAssets': 'CurrentAssets',
+            'CurrentAssets': None,  # Subtotal
+            
+            # Non-Current Assets
+            'PropertyPlantAndEquipmentNet': 'NonCurrentAssets',
+            'Goodwill': 'NonCurrentAssets',
+            'IntangibleAssetsNet': 'NonCurrentAssets',
+            'LongTermInvestments': 'NonCurrentAssets',
+            'DeferredTaxAssets': 'NonCurrentAssets',
+            'OtherLongTermAssets': 'NonCurrentAssets',
+            'NonCurrentAssets': None,  # Subtotal
+            
+            'TotalAssets': None,  # Total Assets
+            
+            # Current Liabilities
+            'AccountsPayable': 'CurrentLiabilities',
+            'AccruedExpenses': 'CurrentLiabilities',
+            'DeferredRevenue': 'CurrentLiabilities',
+            'ShortTermDebt': 'CurrentLiabilities',
+            'OtherCurrentLiabilities': 'CurrentLiabilities',
+            'CurrentLiabilities': None,  # Subtotal
+            
+            # Non-Current Liabilities
+            'LongTermDebt': 'NonCurrentLiabilities',
+            'DeferredTaxLiabilities': 'NonCurrentLiabilities',
+            'OtherLongTermLiabilities': 'NonCurrentLiabilities',
+            'NonCurrentLiabilities': None,  # Subtotal
+            
+            'TotalLiabilities': None,  # Total Liabilities
+            
+            # Stockholders' Equity
+            'CommonStock': 'StockholdersEquity',
+            'AdditionalPaidInCapital': 'StockholdersEquity',
+            'RetainedEarnings': 'StockholdersEquity',
+            'AccumulatedOtherComprehensiveIncome': 'StockholdersEquity',
+            'TreasuryStock': 'StockholdersEquity',
+            'StockholdersEquity': None,  # Subtotal
+            
+            # Calculated metrics
+            'WorkingCapital': None,
+            'TotalDebt': None,
+            
+            # Cash Flow Statement - Standard format
+            # Operating Activities
+            'NetIncome': None,  # Starting point
+            'DepreciationAndAmortization': 'OperatingAdjustments',
+            'StockBasedCompensation': 'OperatingAdjustments',
+            'DeferredIncomeTaxes': 'OperatingAdjustments',
+            'OperatingAdjustments': None,  # Subtotal
+            
+            # Changes in Working Capital
+            'ChangeInAccountsReceivable': 'WorkingCapitalChanges',
+            'ChangeInInventory': 'WorkingCapitalChanges',
+            'ChangeInAccountsPayable': 'WorkingCapitalChanges',
+            'ChangeInDeferredRevenue': 'WorkingCapitalChanges',
+            'ChangeInOtherWorkingCapital': 'WorkingCapitalChanges',
+            'WorkingCapitalChanges': None,  # Subtotal
+            
+            'OtherOperatingActivities': 'OperatingActivities',
+            'OperatingActivities': None,  # Subtotal
+            'NetCashFromOperatingActivities': None,  # Total
+            
+            # Investing Activities
+            'CapitalExpenditures': 'InvestingActivities',
+            'Acquisitions': 'InvestingActivities',
+            'Investments': 'InvestingActivities',
+            'ProceedsFromInvestments': 'InvestingActivities',
+            'OtherInvestingActivities': 'InvestingActivities',
+            'InvestingActivities': None,  # Subtotal
+            'NetCashFromInvestingActivities': None,  # Total
+            
+            # Financing Activities
+            'ProceedsFromDebt': 'FinancingActivities',
+            'RepaymentsOfDebt': 'FinancingActivities',
+            'DividendsPaid': 'FinancingActivities',
+            'StockRepurchases': 'FinancingActivities',
+            'ProceedsFromStockIssuance': 'FinancingActivities',
+            'OtherFinancingActivities': 'FinancingActivities',
+            'FinancingActivities': None,  # Subtotal
+            'NetCashFromFinancingActivities': None,  # Total
+            
+            # Net Change and Ending Balance
+            'EffectOfExchangeRateChanges': None,
+            'NetChangeInCash': None,  # Final total
+            'CashAtBeginningOfPeriod': None,
+            'CashAtEndOfPeriod': None
+        }
+
+        # Open the workbook
+        wb = openpyxl.load_workbook(filepath)
+        
+        # Format annual and quarterly sheets
+        for sheet in ['Annual Financial Statements', 'Quarterly Financial Statements']:
+            if sheet in wb.sheetnames:
+                ws = wb[sheet]
+                # Bold headers
+                for row in ws.iter_rows(min_row=1, max_row=1):
+                    for cell in row:
+                        cell.font = Font(bold=True)
+                # Indent and bold parent categories (if present)
+                def format_row(row):
+                    line_item_cell = row[0]
+                    if line_item_cell.value in parent_map:
+                        parent = parent_map[line_item_cell.value]
+                        if parent is None:
+                            line_item_cell.font = Font(bold=True)
+                        else:
+                            indent_level = 1
+                            p = parent
+                            while p:
+                                indent_level += 1
+                                p = parent_map.get(p)
+                            line_item_cell.alignment = Alignment(indent=indent_level)
+                
+                rows = list(ws.iter_rows(min_row=2))
+                if schmoove_mode and n_jobs > 1:
+                    progress("    • Applying formatting with parallel processing...")
+                    try:
+                        from joblib import Parallel, delayed
+                        Parallel(n_jobs=n_jobs)(delayed(format_row)(row) for row in rows)
+                    except ImportError:
+                        # Fallback to sequential processing
+                        for row in rows:
+                            format_row(row)
+                else:
+                    for row in rows:
+                        format_row(row)
+        
+        # Save the formatted workbook
+        progress("    • Saving formatted Excel file...")
+        wb.save(filepath)
+        progress(f"    ✓ Excel file formatted and saved: {filepath}")
+        return filepath
+
     def export_to_excel(self, financial_model: Dict[str, pd.DataFrame], 
                        sensitivity_model: Dict[str, pd.DataFrame], 
                        ticker: str, filename: str = None, schmoove_mode: bool = False, progress_callback=None) -> str:

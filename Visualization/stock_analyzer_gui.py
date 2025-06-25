@@ -326,12 +326,13 @@ class AnalysisWorker(QThread):
     error_occurred = pyqtSignal(str)
     preview_ready = pyqtSignal(str)  # New signal for preview
     
-    def __init__(self, ticker: str, quarters: int, schmoove_mode: bool = False, enhanced_fuzzy_matching: bool = True):
+    def __init__(self, ticker: str, quarters: int, schmoove_mode: bool = False, enhanced_fuzzy_matching: bool = True, fast_preview: bool = True):
         super().__init__()
         self.ticker = ticker
         self.quarters = quarters
         self.schmoove_mode = schmoove_mode
         self.enhanced_fuzzy_matching = enhanced_fuzzy_matching
+        self.fast_preview = fast_preview
         self.sourcer = SECFileSourcer()
     
     def run(self):
@@ -428,14 +429,23 @@ class AnalysisWorker(QThread):
             preview_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage', preview_filename)
             
             # Pass progress callback to export_to_excel
-            self.sourcer.export_to_excel(
-                financial_model, 
-                sensitivity_model, 
-                self.ticker, 
-                filename=preview_filename, 
-                schmoove_mode=self.schmoove_mode,
-                progress_callback=self.progress_updated.emit
-            )
+            if self.fast_preview:
+                self.sourcer.export_to_excel_fast_preview(
+                    financial_model, 
+                    sensitivity_model, 
+                    self.ticker, 
+                    preview_filename, 
+                    progress_callback=self.progress_updated.emit
+                )
+            else:
+                self.sourcer.export_to_excel(
+                    financial_model, 
+                    sensitivity_model, 
+                    self.ticker, 
+                    filename=preview_filename, 
+                    schmoove_mode=self.schmoove_mode,
+                    progress_callback=self.progress_updated.emit
+                )
             self.preview_ready.emit(preview_path)
             
             self.progress_updated.emit("  • Creating final Excel file with professional formatting...")
@@ -818,12 +828,34 @@ class StockAnalyzerGUI(QMainWindow):
         
         input_layout.addLayout(fuzzy_layout, 6, 0, 1, 2)
         
+        # Fast Preview Formatting Checkbox
+        fast_preview_layout = QHBoxLayout()
+        self.fast_preview_checkbox = QCheckBox()
+        self.fast_preview_checkbox.setChecked(True)  # Default to enabled for faster preview
+        fast_preview_label = QLabel("⚡ Fast Preview (Skip Formatting)")
+        fast_preview_label.setStyleSheet("font-weight: bold; color: #FF6B35; font-size: 11px;")
+        
+        # Add tooltip for explanation
+        fast_preview_tooltip = ("When enabled, creates preview files without professional formatting for faster generation.\n"
+                               "When disabled, applies full formatting to preview files (slower but more professional).\n\n"
+                               "Final Excel files always include full formatting regardless of this setting.")
+        fast_preview_label.setToolTip(fast_preview_tooltip)
+        self.fast_preview_checkbox.setToolTip(fast_preview_tooltip)
+        
+        # Add widgets with proper spacing
+        fast_preview_layout.addWidget(self.fast_preview_checkbox)
+        fast_preview_layout.addSpacing(20)  # Fixed spacing instead of stretch
+        fast_preview_layout.addWidget(fast_preview_label, 1)  # Give it stretch factor of 1
+        fast_preview_layout.addStretch()  # Only one stretch at the end
+        
+        input_layout.addLayout(fast_preview_layout, 7, 0, 1, 2)
+        
         # Analysis button
         self.analyze_button = QPushButton("Analyze Stock")
         self.analyze_button.clicked.connect(self.start_analysis)
         self.analyze_button.setMinimumHeight(40)
         
-        input_layout.addWidget(self.analyze_button, 7, 0, 1, 2)
+        input_layout.addWidget(self.analyze_button, 8, 0, 1, 2)
         
         input_group.setLayout(input_layout)
         parent_layout.addWidget(input_group)
@@ -1013,6 +1045,7 @@ class StockAnalyzerGUI(QMainWindow):
         quarters = self.get_quarters_from_period()
         schmoove_mode = self.schmoove_checkbox.isChecked()
         enhanced_fuzzy_matching = self.fuzzy_checkbox.isChecked()
+        fast_preview = self.fast_preview_checkbox.isChecked()
         
         # Disable input during analysis
         self.ticker_input.setEnabled(False)
@@ -1020,6 +1053,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.quarters_input.setEnabled(False)
         self.schmoove_checkbox.setEnabled(False)
         self.fuzzy_checkbox.setEnabled(False)
+        self.fast_preview_checkbox.setEnabled(False)
         self.analyze_button.setEnabled(False)
         
         # Show progress
@@ -1032,7 +1066,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.flames.setVisible(schmoove_mode)
         
         # Create and start worker thread
-        self.worker = AnalysisWorker(ticker, quarters, schmoove_mode=schmoove_mode, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
+        self.worker = AnalysisWorker(ticker, quarters, schmoove_mode=schmoove_mode, enhanced_fuzzy_matching=enhanced_fuzzy_matching, fast_preview=fast_preview)
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.analysis_complete.connect(self.handle_analysis_complete)
         self.worker.error_occurred.connect(self.handle_analysis_error)
@@ -1057,6 +1091,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.quarters_input.setEnabled(True)
         self.schmoove_checkbox.setEnabled(True)
         self.fuzzy_checkbox.setEnabled(True)
+        self.fast_preview_checkbox.setEnabled(True)
         self.analyze_button.setEnabled(True)
         
         # Hide progress
@@ -1078,6 +1113,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.quarters_input.setEnabled(True)
         self.schmoove_checkbox.setEnabled(True)
         self.fuzzy_checkbox.setEnabled(True)
+        self.fast_preview_checkbox.setEnabled(True)
         self.analyze_button.setEnabled(True)
         
         # Hide progress
