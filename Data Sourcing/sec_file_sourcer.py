@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import time
 from typing import Dict, List, Optional, Tuple
 import warnings
+import os
 warnings.filterwarnings('ignore')
 
 class SECFileSourcer:
@@ -25,13 +26,12 @@ class SECFileSourcer:
     
     def __init__(self):
         """Initialize the SEC File Sourcer with base URLs and headers."""
-        self.base_url = "https://data.sec.gov/api"
+        self.base_url = "https://data.sec.gov"
         self.sec_ticker_url = "https://www.sec.gov/files/company_tickers.json"
         self.headers = {
             'User-Agent': 'ModelMaker/1.0 (kit.kumar@gmail.com)',
             'Accept': 'application/json',
-            'Accept-Encoding': 'gzip, deflate',
-            'Host': 'www.sec.gov'
+            'Accept-Encoding': 'gzip, deflate'
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -63,8 +63,11 @@ class SECFileSourcer:
                 print(f"Error fetching company tickers: {response.status_code}")
                 return None
             data = response.json()
-            # Build a case-insensitive mapping
-            cache = {info['ticker'].upper(): cik.zfill(10) for cik, info in data.items() if 'ticker' in info}
+            # The SEC file is now a dictionary with numeric string keys
+            cache = {}
+            for key, entry in data.items():
+                if isinstance(entry, dict) and 'ticker' in entry and 'cik_str' in entry:
+                    cache[entry['ticker'].upper()] = str(entry['cik_str']).zfill(10)
             cls._ticker_cik_cache = cache
             cls._cache_last_updated = time.time()
             return cache
@@ -178,57 +181,182 @@ class SECFileSourcer:
                 print(f"Could not find CIK for ticker: {ticker}")
                 return financial_model
             
-            # Get company facts
-            company_facts_url = f"{self.base_url}/xbrl/companyfacts/CIK{cik}.json"
+            # Remove leading zeros from CIK for new endpoint
+            cik_no_zeros = str(int(cik))
+            # Get company facts from new endpoint
+            company_facts_url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik_no_zeros}.json"
             response = self.session.get(company_facts_url)
             
-            if response.status_code != 200:
-                print(f"Error fetching company facts for {ticker} (CIK: {cik})")
+            if response.status_code == 200:
+                facts_data = response.json()
+                facts = facts_data.get('facts', {})
+                # Define key financial metrics for each statement
+                income_statement_metrics = {
+                    'Revenues': 'us-gaap:Revenues',
+                    'CostOfRevenue': 'us-gaap:CostOfRevenue',
+                    'GrossProfit': 'us-gaap:GrossProfit',
+                    'OperatingExpenses': 'us-gaap:OperatingExpenses',
+                    'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
+                    'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
+                    'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
+                    'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
+                }
+                balance_sheet_metrics = {
+                    'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
+                    'TotalAssets': 'us-gaap:Assets',
+                    'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
+                    'TotalLiabilities': 'us-gaap:Liabilities',
+                    'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
+                    'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
+                    'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
+                }
+                cash_flow_metrics = {
+                    'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
+                    'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
+                    'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
+                    'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
+                    'DividendsPaid': 'us-gaap:PaymentsOfDividends'
+                }
+                for period in ['annual', 'quarterly']:
+                    for statement, metrics in [('income_statement', income_statement_metrics),
+                                             ('balance_sheet', balance_sheet_metrics),
+                                             ('cash_flow', cash_flow_metrics)]:
+                        df = self._extract_financial_data(facts, metrics, period)
+                        financial_model[f'{period}_{statement}'] = df
                 return financial_model
-            
-            facts_data = response.json()
-            facts = facts_data.get('facts', {})
-            
-            # Define key financial metrics for each statement
-            income_statement_metrics = {
-                'Revenues': 'us-gaap:Revenues',
-                'CostOfRevenue': 'us-gaap:CostOfRevenue',
-                'GrossProfit': 'us-gaap:GrossProfit',
-                'OperatingExpenses': 'us-gaap:OperatingExpenses',
-                'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
-                'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
-                'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
-                'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
-            }
-            
-            balance_sheet_metrics = {
-                'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
-                'TotalAssets': 'us-gaap:Assets',
-                'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
-                'TotalLiabilities': 'us-gaap:Liabilities',
-                'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
-                'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
-                'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
-            }
-            
-            cash_flow_metrics = {
-                'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
-                'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
-                'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
-                'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
-                'DividendsPaid': 'us-gaap:PaymentsOfDividends'
-            }
-            
-            # Extract data for each statement and period
-            for period in ['annual', 'quarterly']:
-                for statement, metrics in [('income_statement', income_statement_metrics),
-                                         ('balance_sheet', balance_sheet_metrics),
-                                         ('cash_flow', cash_flow_metrics)]:
-                    
-                    df = self._extract_financial_data(facts, metrics, period)
-                    financial_model[f'{period}_{statement}'] = df
-            
-            return financial_model
+            else:
+                print(f"XBRL JSON not available, trying XBRL XML instance document for {ticker} (CIK: {cik_no_zeros})")
+                # Fallback: Try to find and parse XBRL XML instance document using Arelle
+                try:
+                    filings_df = self.find_sec_filings(ticker)
+                    if filings_df.empty:
+                        print(f"No filings found for {ticker}")
+                        return financial_model
+                    # Try the most recent 10-K or 10-Q
+                    for idx, row in filings_df.iterrows():
+                        accession_number = row['accessionNumber']
+                        cik_dir = str(int(cik))
+                        accession_clean = accession_number.replace('-', '')
+                        filing_dir_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/"
+                        # List files in the directory
+                        dir_response = self.session.get(filing_dir_url)
+                        if dir_response.status_code == 200:
+                            # Find .xml files (XBRL instance docs)
+                            import re
+                            xml_files = re.findall(r'href="([^"]+\.xml)"', dir_response.text)
+                            xbrl_instance_file = None
+                            # Prefer files ending with _htm.xml and not FilingSummary.xml
+                            for xml_file in xml_files:
+                                if xml_file.endswith('_htm.xml') and 'FilingSummary' not in xml_file:
+                                    xbrl_instance_file = xml_file
+                                    break
+                            if xbrl_instance_file is None:
+                                # Fallback: pick the first .xml file that's not FilingSummary
+                                for xml_file in xml_files:
+                                    if 'FilingSummary' not in xml_file:
+                                        xbrl_instance_file = xml_file
+                                        break
+                            if xbrl_instance_file:
+                                xbrl_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/{xbrl_instance_file}"
+                                print(f"Parsing XBRL instance document: {xbrl_url}")
+                                # Use Arelle to parse the XBRL instance document
+                                try:
+                                    from arelle import Cntlr
+                                    cntlr = Cntlr.Cntlr(logFileName=None)
+                                    model_xbrl = cntlr.modelManager.load(xbrl_url)
+                                    
+                                    # Extract facts from the XBRL instance document
+                                    facts_from_xml = {}
+                                    
+                                    # Define the financial metrics we want to extract
+                                    income_statement_metrics = {
+                                        'Revenues': 'us-gaap:Revenues',
+                                        'CostOfRevenue': 'us-gaap:CostOfRevenue',
+                                        'GrossProfit': 'us-gaap:GrossProfit',
+                                        'OperatingExpenses': 'us-gaap:OperatingExpenses',
+                                        'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
+                                        'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
+                                        'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
+                                        'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
+                                    }
+                                    
+                                    balance_sheet_metrics = {
+                                        'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
+                                        'TotalAssets': 'us-gaap:Assets',
+                                        'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
+                                        'TotalLiabilities': 'us-gaap:Liabilities',
+                                        'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
+                                        'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
+                                        'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
+                                    }
+                                    
+                                    cash_flow_metrics = {
+                                        'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
+                                        'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
+                                        'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
+                                        'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
+                                        'DividendsPaid': 'us-gaap:PaymentsOfDividends'
+                                    }
+                                    
+                                    # Extract facts from the XBRL model
+                                    for fact in model_xbrl.facts:
+                                        if fact.concept is not None:
+                                            concept_name = fact.concept.qname
+                                            value = fact.value
+                                            context = fact.context
+                                            
+                                            if context is not None:
+                                                period = context.period
+                                                if period is not None:
+                                                    end_date = period.endDate
+                                                    if end_date:
+                                                        # Store the fact with its period
+                                                        if concept_name not in facts_from_xml:
+                                                            facts_from_xml[concept_name] = []
+                                                        facts_from_xml[concept_name].append({
+                                                            'value': value,
+                                                            'end_date': end_date,
+                                                            'context': context
+                                                        })
+                                    
+                                    print(f"Extracted {len(facts_from_xml)} unique concepts from XBRL")
+                                    
+                                    # Map the extracted facts to financial statements
+                                    all_metrics = {**income_statement_metrics, **balance_sheet_metrics, **cash_flow_metrics}
+                                    
+                                    for period in ['annual', 'quarterly']:
+                                        for statement, metrics in [('income_statement', income_statement_metrics),
+                                                                 ('balance_sheet', balance_sheet_metrics),
+                                                                 ('cash_flow', cash_flow_metrics)]:
+                                            
+                                            # Create a facts dictionary in the format expected by _extract_financial_data
+                                            formatted_facts = {}
+                                            for metric_name, sec_tag in metrics.items():
+                                                if sec_tag in facts_from_xml:
+                                                    formatted_facts[sec_tag] = {
+                                                        'units': {
+                                                            'USD': facts_from_xml[sec_tag]
+                                                        }
+                                                    }
+                                            
+                                            # Use the existing extraction logic
+                                            df = self._extract_financial_data(formatted_facts, metrics, period)
+                                            financial_model[f'{period}_{statement}'] = df
+                                    
+                                    print("Successfully mapped XBRL facts to financial model")
+                                    break
+                                    
+                                except Exception as e:
+                                    print(f"Error parsing XBRL instance document: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+                        else:
+                            print(f"Could not access filing directory: {filing_dir_url}")
+                        # Only try the first available filing
+                        break
+                except Exception as e:
+                    print(f"Error in XBRL XML fallback: {e}")
+                return financial_model
             
         except Exception as e:
             print(f"Error in create_financial_model: {str(e)}")
@@ -614,11 +742,16 @@ class SECFileSourcer:
         Returns:
             str: Path to the exported Excel file
         """
+        # Ensure the Storage directory exists
+        storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
+        os.makedirs(storage_dir, exist_ok=True)
+        
         if filename is None:
             filename = f"{ticker}_financial_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filepath = os.path.join(storage_dir, filename)
         
         try:
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
                 # Write base financial model sheets
                 for sheet_name, df in financial_model.items():
                     if not df.empty:
@@ -642,11 +775,11 @@ class SECFileSourcer:
                 summary_df = pd.DataFrame(summary_data)
                 summary_df.to_excel(writer, sheet_name='Summary', index=False)
             
-            print(f"Financial model exported to: {filename}")
-            return filename
+            print(f"Financial model exported to: {filepath}")
+            return filepath
             
         except Exception as e:
-            print(f"Error exporting to Excel: {str(e)}")
+            print(f"Error exporting to Excel: {e}")
             return ""
 
 # Example usage and testing
@@ -654,8 +787,8 @@ if __name__ == "__main__":
     # Initialize the SEC File Sourcer
     sourcer = SECFileSourcer()
     
-    # Example ticker
-    ticker = "AAPL"
+    # Example ticker - testing with MSFT instead of AAPL
+    ticker = "MSFT"
     
     print(f"Finding SEC filings for {ticker}...")
     filings = sourcer.find_sec_filings(ticker)
@@ -668,10 +801,13 @@ if __name__ == "__main__":
     print(f"\nCreating financial model for {ticker}...")
     financial_model = sourcer.create_financial_model(ticker)
     
-    print(f"\nCreating sensitivity analysis for {ticker}...")
-    sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker)
-    
-    # Export to Excel
-    excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
-    
-    print(f"\nModel creation complete! Check the Excel file: {excel_file}") 
+    # Only proceed if at least one financial model dataframe is non-empty
+    if any(not df.empty for df in financial_model.values()):
+        print(f"\nCreating sensitivity analysis for {ticker}...")
+        sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker)
+        
+        # Export to Excel
+        excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
+        print(f"\nModel creation complete! Check the Excel file: {excel_file}")
+    else:
+        print("\nNo financial data was successfully pulled. Excel file will not be created.") 
