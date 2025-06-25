@@ -6,6 +6,9 @@ import time
 from typing import Dict, List, Optional, Tuple
 import warnings
 import os
+import sys
+from difflib import SequenceMatcher
+import re
 warnings.filterwarnings('ignore')
 
 class SECFileSourcer:
@@ -228,147 +231,84 @@ class SECFileSourcer:
                 print(f"XBRL JSON not available, trying XBRL XML instance document for {ticker} (CIK: {cik_no_zeros})")
                 # Fallback: Try to find and parse XBRL XML instance document using Arelle
                 try:
+                    print(f"Finding SEC filings for {ticker}...")
                     filings_df = self.find_sec_filings(ticker)
                     if filings_df.empty:
                         print(f"No filings found for {ticker}")
                         return financial_model
-                    # Try the most recent 10-K or 10-Q
-                    for idx, row in filings_df.iterrows():
-                        accession_number = row['accessionNumber']
-                        cik_dir = str(int(cik))
-                        accession_clean = accession_number.replace('-', '')
-                        filing_dir_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/"
-                        # List files in the directory
-                        dir_response = self.session.get(filing_dir_url)
-                        if dir_response.status_code == 200:
-                            # Find .xml files (XBRL instance docs)
-                            import re
-                            xml_files = re.findall(r'href="([^"]+\.xml)"', dir_response.text)
-                            xbrl_instance_file = None
-                            # Prefer files ending with _htm.xml and not FilingSummary.xml
-                            for xml_file in xml_files:
-                                if xml_file.endswith('_htm.xml') and 'FilingSummary' not in xml_file:
-                                    xbrl_instance_file = xml_file
-                                    break
-                            if xbrl_instance_file is None:
-                                # Fallback: pick the first .xml file that's not FilingSummary
-                                for xml_file in xml_files:
-                                    if 'FilingSummary' not in xml_file:
-                                        xbrl_instance_file = xml_file
-                                        break
-                            if xbrl_instance_file:
-                                xbrl_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/{xbrl_instance_file}"
-                                print(f"Parsing XBRL instance document: {xbrl_url}")
-                                # Use Arelle to parse the XBRL instance document
-                                try:
-                                    from arelle import Cntlr
-                                    cntlr = Cntlr.Cntlr(logFileName=None)
-                                    model_xbrl = cntlr.modelManager.load(xbrl_url)
-                                    
-                                    # Extract facts from the XBRL instance document
-                                    facts_from_xml = {}
-                                    
-                                    # Define the financial metrics we want to extract
-                                    income_statement_metrics = {
-                                        'Revenues': 'us-gaap:Revenues',
-                                        'CostOfRevenue': 'us-gaap:CostOfRevenue',
-                                        'GrossProfit': 'us-gaap:GrossProfit',
-                                        'OperatingExpenses': 'us-gaap:OperatingExpenses',
-                                        'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
-                                        'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
-                                        'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
-                                        'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
-                                    }
-                                    
-                                    balance_sheet_metrics = {
-                                        'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
-                                        'TotalAssets': 'us-gaap:Assets',
-                                        'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
-                                        'TotalLiabilities': 'us-gaap:Liabilities',
-                                        'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
-                                        'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
-                                        'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
-                                    }
-                                    
-                                    cash_flow_metrics = {
-                                        'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
-                                        'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
-                                        'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
-                                        'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
-                                        'DividendsPaid': 'us-gaap:PaymentsOfDividends'
-                                    }
-                                    
-                                    # Extract facts from the XBRL model
-                                    for fact in model_xbrl.facts:
-                                        if fact.concept is not None:
-                                            concept_name = fact.concept.qname
-                                            value = fact.value
-                                            context = fact.context
-                                            
-                                            if context is not None:
-                                                period = context.period
-                                                if period is not None:
-                                                    end_date = period.endDate
-                                                    if end_date:
-                                                        # Store the fact with its period
-                                                        if concept_name not in facts_from_xml:
-                                                            facts_from_xml[concept_name] = []
-                                                        facts_from_xml[concept_name].append({
-                                                            'value': value,
-                                                            'end_date': end_date,
-                                                            'context': context
-                                                        })
-                                    
-                                    print(f"Extracted {len(facts_from_xml)} unique concepts from XBRL")
-                                    
-                                    # Map the extracted facts to financial statements
-                                    all_metrics = {**income_statement_metrics, **balance_sheet_metrics, **cash_flow_metrics}
-                                    
-                                    for period in ['annual', 'quarterly']:
-                                        for statement, metrics in [('income_statement', income_statement_metrics),
-                                                                 ('balance_sheet', balance_sheet_metrics),
-                                                                 ('cash_flow', cash_flow_metrics)]:
-                                            
-                                            # Create a facts dictionary in the format expected by _extract_financial_data
-                                            formatted_facts = {}
-                                            for metric_name, sec_tag in metrics.items():
-                                                if sec_tag in facts_from_xml:
-                                                    formatted_facts[sec_tag] = {
-                                                        'units': {
-                                                            'USD': facts_from_xml[sec_tag]
-                                                        }
-                                                    }
-                                            
-                                            # Use the existing extraction logic
-                                            df = self._extract_financial_data(formatted_facts, metrics, period)
-                                            financial_model[f'{period}_{statement}'] = df
-                                    
-                                    print("Successfully mapped XBRL facts to financial model")
-                                    break
-                                    
-                                except Exception as e:
-                                    print(f"Error parsing XBRL instance document: {e}")
-                                    import traceback
-                                    traceback.print_exc()
+                    
+                    # Separate 10-K and 10-Q filings
+                    k_filings = filings_df[filings_df['form'] == '10-K'].head(2)  # Get 2 most recent 10-Ks
+                    q_filings = filings_df[filings_df['form'] == '10-Q'].head(8)  # Get 8 most recent 10-Qs
+                    
+                    print(f"Found {len(k_filings)} 10-K filings and {len(q_filings)} 10-Q filings")
+                    print(f"Starting comprehensive data extraction...")
+                    
+                    # Initialize comprehensive financial model
+                    comprehensive_facts = {}
+                    annual_data = {}
+                    quarterly_data = {}
+                    
+                    # Process 10-K filings first (primary source for annual data)
+                    print(f"\nProcessing {len(k_filings)} 10-K filings (annual data)...")
+                    for i, (idx, row) in enumerate(k_filings.iterrows(), 1):
+                        print(f"  [{i}/{len(k_filings)}] Processing 10-K: {row['filingDate']} ({row['accessionNumber']})")
+                        k_facts = self._extract_xbrl_from_filing(row, cik)
+                        if k_facts:
+                            # Store annual data from 10-K
+                            for concept, data in k_facts.items():
+                                if concept not in annual_data:
+                                    annual_data[concept] = []
+                                annual_data[concept].extend(data)
+                            comprehensive_facts.update(k_facts)
+                            print(f"    Extracted {len(k_facts)} concepts")
                         else:
-                            print(f"Could not access filing directory: {filing_dir_url}")
-                        # Only try the first available filing
-                        break
+                            print(f"    No data extracted")
+                    
+                    # Process 10-Q filings (supplementary quarterly data)
+                    print(f"\nProcessing {len(q_filings)} 10-Q filings (quarterly data)...")
+                    for i, (idx, row) in enumerate(q_filings.iterrows(), 1):
+                        print(f"  [{i}/{len(q_filings)}] Processing 10-Q: {row['filingDate']} ({row['accessionNumber']})")
+                        q_facts = self._extract_xbrl_from_filing(row, cik)
+                        if q_facts:
+                            # Store quarterly data from 10-Q
+                            for concept, data in q_facts.items():
+                                if concept not in quarterly_data:
+                                    quarterly_data[concept] = []
+                                quarterly_data[concept].extend(data)
+                            comprehensive_facts.update(q_facts)
+                            print(f"    Extracted {len(q_facts)} concepts")
+                        else:
+                            print(f"    No data extracted")
+                    
+                    if not comprehensive_facts:
+                        print("No XBRL data found in any filings")
+                        return financial_model
+                    
+                    print(f"\nComprehensive data extracted: {len(comprehensive_facts)} unique concepts")
+                    print(f"Annual data: {sum(len(data) for data in annual_data.values())} data points")
+                    print(f"Quarterly data: {sum(len(data) for data in quarterly_data.values())} data points")
+                    
+                    # Run discrepancy checks between annual and quarterly data
+                    print(f"\nRunning discrepancy checks...")
+                    self._run_discrepancy_checks(annual_data, quarterly_data)
+                    
+                    # Create financial model using comprehensive data
+                    print(f"\nCreating comprehensive financial model...")
+                    financial_model = self._create_model_from_comprehensive_data(comprehensive_facts, annual_data, quarterly_data)
+                    
+                    print(f"Comprehensive financial model created successfully!")
+                    return financial_model
+                    
                 except Exception as e:
-                    print(f"Error in XBRL XML fallback: {e}")
-                return financial_model
-            
+                    print(f"Error in comprehensive XBRL processing: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    return financial_model
         except Exception as e:
-            print(f"Error in create_financial_model: {str(e)}")
-            return {
-                'annual_income_statement': pd.DataFrame(),
-                'annual_balance_sheet': pd.DataFrame(),
-                'annual_cash_flow': pd.DataFrame(),
-                'quarterly_income_statement': pd.DataFrame(),
-                'quarterly_balance_sheet': pd.DataFrame(),
-                'quarterly_cash_flow': pd.DataFrame()
-            }
-    
+            print(f"Error creating financial model: {str(e)}")
+            return financial_model
+
     def _extract_financial_data(self, facts: Dict, metrics: Dict, period: str) -> pd.DataFrame:
         """
         Extract financial data from SEC facts for a given period and set of metrics.
@@ -782,32 +722,302 @@ class SECFileSourcer:
             print(f"Error exporting to Excel: {e}")
             return ""
 
+    def _extract_xbrl_from_filing(self, filing_row, cik):
+        """
+        Extract XBRL data from a specific filing.
+        
+        Args:
+            filing_row: DataFrame row containing filing information
+            cik: Company CIK number
+            
+        Returns:
+            Dict: Extracted XBRL facts
+        """
+        try:
+            accession_number = filing_row['accessionNumber']
+            cik_dir = str(int(cik))
+            accession_clean = accession_number.replace('-', '')
+            filing_dir_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/"
+            
+            # List files in the directory
+            print(f"Accessing filing directory...")
+            dir_response = self.session.get(filing_dir_url)
+            if dir_response.status_code != 200:
+                print(f"Could not access filing directory: {filing_dir_url}")
+                return None
+            
+            # Find .xml files (XBRL instance docs)
+            import re
+            xml_files = re.findall(r'href="([^"]+\.xml)"', dir_response.text)
+            xbrl_instance_file = None
+            
+            print(f"Found {len(xml_files)} XML files")
+            
+            # Prefer files ending with _htm.xml and not FilingSummary.xml
+            for xml_file in xml_files:
+                if xml_file.endswith('_htm.xml') and 'FilingSummary' not in xml_file:
+                    xbrl_instance_file = xml_file
+                    break
+            
+            if xbrl_instance_file is None:
+                # Fallback: pick the first .xml file that's not FilingSummary
+                for xml_file in xml_files:
+                    if 'FilingSummary' not in xml_file:
+                        xbrl_instance_file = xml_file
+                        break
+            
+            if not xbrl_instance_file:
+                print(f"No XBRL instance document found")
+                return None
+            
+            # Construct URL
+            if xbrl_instance_file.startswith('/'):
+                xbrl_url = f"https://www.sec.gov{xbrl_instance_file}"
+            else:
+                xbrl_url = f"https://www.sec.gov/Archives/edgar/data/{cik_dir}/{accession_clean}/{xbrl_instance_file}"
+            
+            print(f"Parsing XBRL: {xbrl_instance_file}")
+            
+            # Use Arelle to parse the XBRL instance document
+            from arelle import Cntlr
+            cntlr = Cntlr.Cntlr(logFileName=None)
+            model_xbrl = cntlr.modelManager.load(xbrl_url)
+            
+            # Extract facts from the XBRL model
+            facts_from_xml = {}
+            fact_count = 0
+            
+            print(f"Extracting facts from XBRL model...")
+            for fact in model_xbrl.facts:
+                try:
+                    concept_name = fact.qname
+                    value = fact.value
+                    context = fact.context
+                    
+                    if context is not None:
+                        period = context.period
+                        if period is not None:
+                            end_date = getattr(period, 'endDate', None)
+                            if end_date is None:
+                                end_date = getattr(period, 'end', None)
+                            if end_date is None:
+                                end_date = getattr(context, 'endDate', None)
+                            
+                            if end_date:
+                                if concept_name not in facts_from_xml:
+                                    facts_from_xml[concept_name] = []
+                                facts_from_xml[concept_name].append({
+                                    'value': value,
+                                    'end_date': end_date,
+                                    'context': context,
+                                    'filing_type': filing_row['form'],
+                                    'filing_date': filing_row['filingDate']
+                                })
+                                fact_count += 1
+                except Exception as e:
+                    continue
+            
+            print(f"Extracted {len(facts_from_xml)} concepts ({fact_count} total facts)")
+            return facts_from_xml
+            
+        except Exception as e:
+            print(f"Error extracting XBRL from filing: {str(e)}")
+            return None
+
+    def _run_discrepancy_checks(self, annual_data, quarterly_data):
+        """
+        Run discrepancy checks between annual and quarterly data for key metrics.
+        
+        Args:
+            annual_data: Annual data from 10-K filings
+            quarterly_data: Quarterly data from 10-Q filings
+        """
+        print("\n" + "="*60)
+        print("DISCREPANCY CHECKS: Annual vs Quarterly Data")
+        print("="*60)
+        
+        # Key metrics to check
+        key_metrics = [
+            'us-gaap:NetIncomeLoss',
+            'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax',
+            'us-gaap:GrossProfit',
+            'us-gaap:OperatingIncomeLoss'
+        ]
+        
+        for metric in key_metrics:
+            if metric in annual_data and metric in quarterly_data:
+                print(f"\nChecking: {metric}")
+                
+                # Get annual values
+                annual_values = {}
+                for item in annual_data[metric]:
+                    date = item['end_date']
+                    value = float(item['value'])
+                    annual_values[date] = value
+                
+                # Get quarterly values and sum them by year
+                quarterly_sums = {}
+                for item in quarterly_data[metric]:
+                    date = item['end_date']
+                    year = date.year
+                    value = float(item['value'])
+                    
+                    if year not in quarterly_sums:
+                        quarterly_sums[year] = 0
+                    quarterly_sums[year] += value
+                
+                # Compare annual vs quarterly sums
+                for year, quarterly_sum in quarterly_sums.items():
+                    # Find annual value for this year
+                    annual_value = None
+                    for date, value in annual_values.items():
+                        if date.year == year:
+                            annual_value = value
+                            break
+                    
+                    if annual_value is not None:
+                        difference = abs(annual_value - quarterly_sum)
+                        difference_pct = (difference / annual_value * 100) if annual_value != 0 else 0
+                        
+                        print(f"  {year}: Annual={annual_value:,.0f}, Quarterly Sum={quarterly_sum:,.0f}")
+                        print(f"    Difference: {difference:,.0f} ({difference_pct:.2f}%)")
+                        
+                        if difference_pct > 5:  # Flag differences > 5%
+                            print(f"    SIGNIFICANT DISCREPANCY DETECTED!")
+                        elif difference_pct > 1:  # Flag differences > 1%
+                            print(f"    Minor discrepancy detected")
+                        else:
+                            print(f"    Data consistent")
+            else:
+                print(f"\nSkipping {metric}: Not available in both annual and quarterly data")
+
+    def _create_model_from_comprehensive_data(self, comprehensive_facts, annual_data, quarterly_data):
+        """
+        Create financial model from comprehensive 10-K and 10-Q data.
+        
+        Args:
+            comprehensive_facts: Combined facts from all filings
+            annual_data: Annual data from 10-K filings
+            quarterly_data: Quarterly data from 10-Q filings
+            
+        Returns:
+            Dict: Financial model with annual and quarterly data
+        """
+        financial_model = {
+            'annual_income_statement': pd.DataFrame(),
+            'annual_balance_sheet': pd.DataFrame(),
+            'annual_cash_flow': pd.DataFrame(),
+            'quarterly_income_statement': pd.DataFrame(),
+            'quarterly_balance_sheet': pd.DataFrame(),
+            'quarterly_cash_flow': pd.DataFrame()
+        }
+        
+        # Define metrics
+        income_statement_metrics = {
+            'Revenues': 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax',
+            'GrossProfit': 'us-gaap:GrossProfit',
+            'OperatingExpenses': 'us-gaap:OperatingExpenses',
+            'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
+            'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
+            'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
+            'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
+        }
+        
+        balance_sheet_metrics = {
+            'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
+            'TotalAssets': 'us-gaap:Assets',
+            'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
+            'TotalLiabilities': 'us-gaap:Liabilities',
+            'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
+            'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
+            'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
+        }
+        
+        cash_flow_metrics = {
+            'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
+            'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
+            'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
+            'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
+            'DividendsPaid': 'us-gaap:Dividends'
+        }
+        
+        # Create annual dataframes (from 10-K data)
+        for statement, metrics in [('income_statement', income_statement_metrics),
+                                 ('balance_sheet', balance_sheet_metrics),
+                                 ('cash_flow', cash_flow_metrics)]:
+            
+            df = self._create_dataframe_from_data(annual_data, metrics, 'annual')
+            financial_model[f'annual_{statement}'] = df
+            print(f"Annual {statement}: {len(df)} rows extracted")
+        
+        # Create quarterly dataframes (from 10-Q data)
+        for statement, metrics in [('income_statement', income_statement_metrics),
+                                 ('balance_sheet', balance_sheet_metrics),
+                                 ('cash_flow', cash_flow_metrics)]:
+            
+            df = self._create_dataframe_from_data(quarterly_data, metrics, 'quarterly')
+            financial_model[f'quarterly_{statement}'] = df
+            print(f"Quarterly {statement}: {len(df)} rows extracted")
+        
+        return financial_model
+
+    def _create_dataframe_from_data(self, data, metrics, period_type):
+        """
+        Create DataFrame from annual or quarterly data.
+        
+        Args:
+            data: Annual or quarterly data dictionary
+            metrics: Metrics dictionary
+            period_type: 'annual' or 'quarterly'
+            
+        Returns:
+            pd.DataFrame: DataFrame with financial data
+        """
+        df_data = {}
+        
+        for metric_name, sec_tag in metrics.items():
+            if sec_tag in data:
+                for item in data[sec_tag]:
+                    date = item['end_date']
+                    value = float(item['value'])
+                    date_str = date.strftime('%Y-%m-%d')
+                    
+                    if date_str not in df_data:
+                        df_data[date_str] = {}
+                    
+                    df_data[date_str][metric_name] = value
+        
+        if df_data:
+            df = pd.DataFrame.from_dict(df_data, orient='index')
+            df.index = pd.to_datetime(df.index)
+            df = df.sort_index()
+            return df
+        else:
+            return pd.DataFrame()
+
 # Example usage and testing
 if __name__ == "__main__":
-    # Initialize the SEC File Sourcer
     sourcer = SECFileSourcer()
-    
-    # Example ticker - testing with MSFT instead of AAPL
-    ticker = "MSFT"
-    
-    print(f"Finding SEC filings for {ticker}...")
-    filings = sourcer.find_sec_filings(ticker)
-    print(f"Found {len(filings)} filings")
-    
-    if not filings.empty:
-        print("\nRecent filings:")
-        print(filings.head())
-    
-    print(f"\nCreating financial model for {ticker}...")
-    financial_model = sourcer.create_financial_model(ticker)
-    
-    # Only proceed if at least one financial model dataframe is non-empty
-    if any(not df.empty for df in financial_model.values()):
-        print(f"\nCreating sensitivity analysis for {ticker}...")
-        sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker)
-        
-        # Export to Excel
-        excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
-        print(f"\nModel creation complete! Check the Excel file: {excel_file}")
+    # Use command-line arguments if provided, otherwise default to AAPL
+    if len(sys.argv) > 1:
+        tickers = [arg.upper() for arg in sys.argv[1:]]
     else:
-        print("\nNo financial data was successfully pulled. Excel file will not be created.") 
+        tickers = ["AAPL"]  # Default to Apple for testing
+
+    for ticker in tickers:
+        print(f"\n{'='*40}\nTesting for ticker: {ticker}\n{'='*40}")
+        print(f"Finding SEC filings for {ticker}...")
+        filings = sourcer.find_sec_filings(ticker)
+        print(f"Found {len(filings)} filings")
+        if not filings.empty:
+            print("Recent filings:")
+            print(filings.head())
+        print(f"\nCreating financial model for {ticker}...")
+        financial_model = sourcer.create_financial_model(ticker)
+        if any(not df.empty for df in financial_model.values()):
+            print(f"\nCreating sensitivity analysis for {ticker}...")
+            sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker)
+            excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
+            print(f"\nModel creation complete! Check the Excel file: {excel_file}")
+        else:
+            print("\nNo financial data was successfully pulled. Excel file will not be created.") 
