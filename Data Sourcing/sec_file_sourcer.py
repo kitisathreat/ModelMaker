@@ -9,6 +9,7 @@ import os
 import sys
 from difflib import SequenceMatcher
 import re
+import numpy as np
 warnings.filterwarnings('ignore')
 
 from joblib import Parallel, delayed
@@ -334,7 +335,7 @@ class SECFileSourcer:
                     
                     # Create financial model using comprehensive data
                     progress("    • Creating comprehensive financial model...")
-                    financial_model = self._create_model_from_comprehensive_data(comprehensive_facts, annual_data, quarterly_data, enhanced_fuzzy_matching)
+                    financial_model = self._create_model_from_comprehensive_data(comprehensive_facts, annual_data, quarterly_data, enhanced_fuzzy_matching, progress_callback)
                     
                     progress("    ✓ Comprehensive financial model created successfully!")
                     return financial_model
@@ -351,6 +352,7 @@ class SECFileSourcer:
     def _extract_financial_data(self, facts: Dict, metrics: Dict, period: str) -> pd.DataFrame:
         """
         Extract financial data from SEC facts for a given period and set of metrics.
+        Now includes validation to filter out non-financial data.
         
         Args:
             facts (Dict): SEC facts data
@@ -358,9 +360,14 @@ class SECFileSourcer:
             period (str): 'annual' or 'quarterly'
             
         Returns:
-            pd.DataFrame: DataFrame with financial data
+            pd.DataFrame: DataFrame with validated financial data
         """
         data = {}
+        validation_stats = {
+            'total_points': 0,
+            'valid_points': 0,
+            'rejected_points': 0
+        }
         
         for metric_name, sec_tag in metrics.items():
             if sec_tag in facts:
@@ -404,10 +411,22 @@ class SECFileSourcer:
                         end_date = period_data.get('end', '')
                         value = period_data.get('val', 0)
                         
-                        if end_date not in data:
-                            data[end_date] = {}
+                        validation_stats['total_points'] += 1
                         
-                        data[end_date][metric_name] = value
+                        # Validate the data point
+                        if self._validate_financial_data(metric_name, value, unit_key):
+                            if end_date not in data:
+                                data[end_date] = {}
+                            data[end_date][metric_name] = value
+                            validation_stats['valid_points'] += 1
+                        else:
+                            validation_stats['rejected_points'] += 1
+        
+        # Log validation statistics for SEC API path
+        if hasattr(self, 'progress_callback') and self.progress_callback:
+            self.progress_callback(f"    • SEC API validation: {validation_stats['valid_points']}/{validation_stats['total_points']} points passed validation")
+            if validation_stats['rejected_points'] > 0:
+                self.progress_callback(f"    • Rejected {validation_stats['rejected_points']} non-financial data points from SEC API")
         
         # Convert to DataFrame
         if data:
@@ -1362,7 +1381,7 @@ class SECFileSourcer:
             else:
                 print(f"\nSkipping {metric}: Not available in both annual and quarterly data")
 
-    def _create_model_from_comprehensive_data(self, comprehensive_facts, annual_data, quarterly_data, enhanced_fuzzy_matching=True):
+    def _create_model_from_comprehensive_data(self, comprehensive_facts, annual_data, quarterly_data, enhanced_fuzzy_matching=True, progress_callback=None):
         """
         Create financial model from comprehensive 10-K and 10-Q data.
         
@@ -1371,10 +1390,18 @@ class SECFileSourcer:
             annual_data: Annual data from 10-K filings
             quarterly_data: Quarterly data from 10-Q filings
             enhanced_fuzzy_matching: Whether to include non-GAAP to GAAP mapping
+            progress_callback: Optional callback function for progress updates
             
         Returns:
             Dict: Financial model with annual and quarterly data
         """
+        # Define progress function for this method
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
         financial_model = {
             'annual_income_statement': pd.DataFrame(),
             'annual_balance_sheet': pd.DataFrame(),
@@ -1399,170 +1426,227 @@ class SECFileSourcer:
         # Define desired metrics with multiple possible tags for each concept
         # Following standard three-statement financial modeling principles
         
-        # INCOME STATEMENT - Standard format from top to bottom
-        income_statement_metrics = {
-            # Revenue section
+        # CORE GAAP CONCEPTS - Essential line items that should always be included
+        # These are the fundamental building blocks of financial statements
+        
+        # INCOME STATEMENT - Core GAAP concepts (top priority)
+        core_income_statement_metrics = {
+            # Revenue (top line)
             'Revenue': ['us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap:Revenues', 'us-gaap:SalesRevenueNet'],
             
             # Cost of goods sold
             'CostOfGoodsSold': ['us-gaap:CostOfRevenue', 'us-gaap:CostOfGoodsAndServicesSold'],
             
-            # Gross profit (calculated)
+            # Gross profit
             'GrossProfit': ['us-gaap:GrossProfit', 'us-gaap:GrossProfitLoss'],
             
-            # Operating expenses
+            # Core operating expenses
             'ResearchAndDevelopmentExpense': ['us-gaap:ResearchAndDevelopmentExpense'],
             'SellingGeneralAndAdministrativeExpense': ['us-gaap:SellingGeneralAndAdministrativeExpense'],
-            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
-            'StockBasedCompensationExpense': ['us-gaap:StockBasedCompensationExpense'],
-            'RestructuringCharges': ['us-gaap:RestructuringCharges'],
-            'ImpairmentCharges': ['us-gaap:ImpairmentCharges'],
-            'OtherOperatingExpenses': ['us-gaap:OtherOperatingIncomeExpense'],
             
             # Operating income
             'OperatingIncome': ['us-gaap:OperatingIncomeLoss'],
             
-            # Non-operating income/expense
-            'InterestIncome': ['us-gaap:InterestIncome'],
+            # Interest and taxes
             'InterestExpense': ['us-gaap:InterestExpense'],
-            'GainLossOnSaleOfAssets': ['us-gaap:GainLossOnSaleOfAssets'],
-            'ForeignCurrencyGainLoss': ['us-gaap:ForeignCurrencyGainLoss'],
-            'OtherIncomeExpense': ['us-gaap:OtherIncomeExpenseNet'],
-            
-            # Income before taxes
-            'IncomeBeforeTaxes': ['us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes'],
-            
-            # Income taxes
             'IncomeTaxExpense': ['us-gaap:IncomeTaxExpenseBenefit'],
             
-            # Net income
+            # Net income (bottom line)
             'NetIncome': ['us-gaap:NetIncomeLoss'],
             
             # Earnings per share
             'EarningsPerShareBasic': ['us-gaap:EarningsPerShareBasic'],
-            'EarningsPerShareDiluted': ['us-gaap:EarningsPerShareDiluted'],
+            'EarningsPerShareDiluted': ['us-gaap:EarningsPerShareDiluted']
+        }
+        
+        # BALANCE SHEET - Core GAAP concepts
+        core_balance_sheet_metrics = {
+            # Core current assets
+            'CashAndCashEquivalents': ['us-gaap:CashAndCashEquivalentsAtCarryingValue'],
+            'AccountsReceivable': ['us-gaap:AccountsReceivableNetCurrent'],
+            'Inventory': ['us-gaap:InventoryNet'],
+            'TotalCurrentAssets': ['us-gaap:AssetsCurrent'],
+            
+            # Core non-current assets
+            'PropertyPlantAndEquipmentNet': ['us-gaap:PropertyPlantAndEquipmentNet'],
+            'Goodwill': ['us-gaap:Goodwill'],
+            'TotalAssets': ['us-gaap:Assets'],
+            
+            # Core current liabilities
+            'AccountsPayable': ['us-gaap:AccountsPayableCurrent'],
+            'TotalCurrentLiabilities': ['us-gaap:LiabilitiesCurrent'],
+            
+            # Core non-current liabilities
+            'LongTermDebt': ['us-gaap:LongTermDebtNoncurrent'],
+            'TotalLiabilities': ['us-gaap:Liabilities'],
+            
+            # Core equity
+            'RetainedEarnings': ['us-gaap:RetainedEarningsAccumulatedDeficit'],
+            'TotalStockholdersEquity': ['us-gaap:StockholdersEquity']
+        }
+        
+        # CASH FLOW STATEMENT - Core GAAP concepts
+        core_cash_flow_metrics = {
+            # Operating activities
+            'NetIncome': ['us-gaap:NetIncomeLoss'],
+            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
+            'NetCashFromOperatingActivities': ['us-gaap:NetCashProvidedByUsedInOperatingActivities'],
+            
+            # Investing activities
+            'CapitalExpenditures': ['us-gaap:PaymentsToAcquirePropertyPlantAndEquipment'],
+            'NetCashFromInvestingActivities': ['us-gaap:NetCashProvidedByUsedInInvestingActivities'],
+            
+            # Financing activities
+            'DividendsPaid': ['us-gaap:PaymentsOfDividends'],
+            'NetCashFromFinancingActivities': ['us-gaap:NetCashProvidedByUsedInFinancingActivities'],
+            
+            # Net change
+            'NetChangeInCash': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect']
+        }
+        
+        # ADDITIONAL GAAP CONCEPTS - Up to 20 additional items that are GAAP-compliant and properly categorized
+        additional_income_statement_metrics = {
+            # Additional operating items
+            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
+            'StockBasedCompensationExpense': ['us-gaap:StockBasedCompensationExpense'],
+            'RestructuringCharges': ['us-gaap:RestructuringCharges'],
+            'ImpairmentCharges': ['us-gaap:ImpairmentCharges'],
+            
+            # Additional non-operating items
+            'InterestIncome': ['us-gaap:InterestIncome'],
+            'GainLossOnSaleOfAssets': ['us-gaap:GainLossOnSaleOfAssets'],
+            'ForeignCurrencyGainLoss': ['us-gaap:ForeignCurrencyGainLoss'],
+            'OtherIncomeExpense': ['us-gaap:OtherIncomeExpenseNet'],
+            
+            # Additional metrics
+            'IncomeBeforeTaxes': ['us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxes'],
             'WeightedAverageSharesBasic': ['us-gaap:WeightedAverageNumberOfSharesOutstandingBasic'],
             'WeightedAverageSharesDiluted': ['us-gaap:WeightedAverageNumberOfSharesOutstandingDiluted']
         }
         
-        # BALANCE SHEET - Standard format: Assets = Liabilities + Equity
-        balance_sheet_metrics = {
-            # Current Assets
-            'CashAndCashEquivalents': ['us-gaap:CashAndCashEquivalentsAtCarryingValue'],
+        additional_balance_sheet_metrics = {
+            # Additional current assets
             'ShortTermInvestments': ['us-gaap:ShortTermInvestments'],
-            'AccountsReceivable': ['us-gaap:AccountsReceivableNetCurrent'],
-            'Inventory': ['us-gaap:InventoryNet'],
             'PrepaidExpenses': ['us-gaap:PrepaidExpenseAndOtherAssetsCurrent'],
             'OtherCurrentAssets': ['us-gaap:OtherAssetsCurrent'],
-            'TotalCurrentAssets': ['us-gaap:AssetsCurrent'],
             
-            # Non-Current Assets
-            'PropertyPlantAndEquipmentNet': ['us-gaap:PropertyPlantAndEquipmentNet'],
-            'Goodwill': ['us-gaap:Goodwill'],
+            # Additional non-current assets
             'IntangibleAssetsNet': ['us-gaap:IntangibleAssetsNetExcludingGoodwill'],
             'LongTermInvestments': ['us-gaap:InvestmentsNoncurrent'],
             'DeferredTaxAssets': ['us-gaap:DeferredTaxAssetsNet'],
             'OtherLongTermAssets': ['us-gaap:OtherAssetsNoncurrent'],
             'TotalNonCurrentAssets': ['us-gaap:AssetsNoncurrent'],
-            'TotalAssets': ['us-gaap:Assets'],
             
-            # Current Liabilities
-            'AccountsPayable': ['us-gaap:AccountsPayableCurrent'],
+            # Additional current liabilities
             'AccruedExpenses': ['us-gaap:AccruedLiabilitiesCurrent'],
             'DeferredRevenue': ['us-gaap:ContractWithCustomerLiabilityCurrent'],
             'ShortTermDebt': ['us-gaap:ShortTermBorrowings'],
             'OtherCurrentLiabilities': ['us-gaap:OtherLiabilitiesCurrent'],
-            'TotalCurrentLiabilities': ['us-gaap:LiabilitiesCurrent'],
             
-            # Non-Current Liabilities
-            'LongTermDebt': ['us-gaap:LongTermDebtNoncurrent'],
+            # Additional non-current liabilities
             'DeferredTaxLiabilities': ['us-gaap:DeferredTaxLiabilitiesNet'],
             'OtherLongTermLiabilities': ['us-gaap:OtherLiabilitiesNoncurrent'],
             'TotalNonCurrentLiabilities': ['us-gaap:LiabilitiesNoncurrent'],
-            'TotalLiabilities': ['us-gaap:Liabilities'],
             
-            # Stockholders' Equity
+            # Additional equity
             'CommonStock': ['us-gaap:CommonStockValue'],
             'AdditionalPaidInCapital': ['us-gaap:AdditionalPaidInCapital'],
-            'RetainedEarnings': ['us-gaap:RetainedEarningsAccumulatedDeficit'],
             'AccumulatedOtherComprehensiveIncome': ['us-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax'],
             'TreasuryStock': ['us-gaap:TreasuryStockValue'],
-            'TotalStockholdersEquity': ['us-gaap:StockholdersEquity'],
             
-            # Calculated metrics
-            'WorkingCapital': ['us-gaap:WorkingCapital'],
-            'TotalDebt': ['us-gaap:LongTermDebtNoncurrent']
+            # Additional calculated metrics
+            'WorkingCapital': ['us-gaap:WorkingCapital']
         }
         
-        # CASH FLOW STATEMENT - Standard format: Operating, Investing, Financing
-        cash_flow_metrics = {
-            # Operating Activities
-            'NetIncome': ['us-gaap:NetIncomeLoss'],
-            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
+        additional_cash_flow_metrics = {
+            # Additional operating activities
             'StockBasedCompensation': ['us-gaap:StockBasedCompensationExpense'],
             'DeferredIncomeTaxes': ['us-gaap:DeferredIncomeTaxExpenseBenefit'],
-            
-            # Changes in Working Capital
             'ChangeInAccountsReceivable': ['us-gaap:IncreaseDecreaseInAccountsReceivable'],
             'ChangeInInventory': ['us-gaap:IncreaseDecreaseInInventories'],
             'ChangeInAccountsPayable': ['us-gaap:IncreaseDecreaseInAccountsPayable'],
             'ChangeInDeferredRevenue': ['us-gaap:IncreaseDecreaseInContractWithCustomerLiability'],
-            'ChangeInOtherWorkingCapital': ['us-gaap:IncreaseDecreaseInOperatingCapital'],
-            
             'OtherOperatingActivities': ['us-gaap:OtherOperatingActivitiesCashFlowStatement'],
-            'NetCashFromOperatingActivities': ['us-gaap:NetCashProvidedByUsedInOperatingActivities'],
             
-            # Investing Activities
-            'CapitalExpenditures': ['us-gaap:PaymentsToAcquirePropertyPlantAndEquipment'],
+            # Additional investing activities
             'Acquisitions': ['us-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired'],
             'Investments': ['us-gaap:PaymentsToAcquireInvestments'],
             'ProceedsFromInvestments': ['us-gaap:ProceedsFromSaleMaturityAndCollectionsOfInvestments'],
             'OtherInvestingActivities': ['us-gaap:OtherInvestingActivitiesCashFlowStatement'],
-            'NetCashFromInvestingActivities': ['us-gaap:NetCashProvidedByUsedInInvestingActivities'],
             
-            # Financing Activities
+            # Additional financing activities
             'ProceedsFromDebt': ['us-gaap:ProceedsFromIssuanceOfLongTermDebt'],
             'RepaymentsOfDebt': ['us-gaap:RepaymentsOfLongTermDebt'],
-            'DividendsPaid': ['us-gaap:PaymentsOfDividends'],
             'StockRepurchases': ['us-gaap:PaymentsForRepurchaseOfCommonStock'],
             'ProceedsFromStockIssuance': ['us-gaap:ProceedsFromIssuanceOfCommonStock'],
             'OtherFinancingActivities': ['us-gaap:OtherFinancingActivitiesCashFlowStatement'],
-            'NetCashFromFinancingActivities': ['us-gaap:NetCashProvidedByUsedInFinancingActivities'],
             
-            # Net Change and Ending Balance
+            # Additional metrics
             'EffectOfExchangeRateChanges': ['us-gaap:EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
-            'NetChangeInCash': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect'],
             'CashAtBeginningOfPeriod': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodBeginningBalance'],
             'CashAtEndOfPeriod': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodEndingBalance']
         }
         
-        # Use fuzzy matching to find the best matches
-        print(f"\nMatching income statement concepts...")
+        # Function to selectively add additional metrics (up to 20 total additional items)
+        def add_selective_additional_metrics(core_mapping, additional_metrics, available_concepts, enhanced_fuzzy_matching):
+            """Add up to 20 additional GAAP-compliant metrics that are available in the data."""
+            additional_mapping = {}
+            total_additional = 0
+            max_additional = 20
+            
+            progress(f"    • Adding up to {max_additional} additional GAAP-compliant line items...")
+            
+            for concept_name, possible_tags in additional_metrics.items():
+                if total_additional >= max_additional:
+                    break
+                    
+                for tag in possible_tags:
+                    # Check if this concept is available and not already in core mapping
+                    if tag in available_concepts and concept_name not in core_mapping:
+                        mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
+                        if mapping:
+                            additional_mapping.update(mapping)
+                            total_additional += 1
+                            progress(f"      ✓ Added: {concept_name}")
+                            break
+            
+            progress(f"    • Added {total_additional} additional line items")
+            return additional_mapping
+        
+        # Start with core metrics
+        progress("    • Matching core GAAP concepts...")
+        
+        # Match core income statement concepts
         income_mapping = {}
-        for concept_name, possible_tags in income_statement_metrics.items():
+        for concept_name, possible_tags in core_income_statement_metrics.items():
             for tag in possible_tags:
                 mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
                 if mapping:
                     income_mapping.update(mapping)
                     break
         
-        print(f"\nMatching balance sheet concepts...")
+        # Match core balance sheet concepts
         balance_mapping = {}
-        for concept_name, possible_tags in balance_sheet_metrics.items():
+        for concept_name, possible_tags in core_balance_sheet_metrics.items():
             for tag in possible_tags:
                 mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
                 if mapping:
                     balance_mapping.update(mapping)
                     break
         
-        print(f"\nMatching cash flow concepts...")
+        # Match core cash flow concepts
         cash_flow_mapping = {}
-        for concept_name, possible_tags in cash_flow_metrics.items():
+        for concept_name, possible_tags in core_cash_flow_metrics.items():
             for tag in possible_tags:
                 mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85, enhanced_fuzzy_matching=enhanced_fuzzy_matching)
                 if mapping:
                     cash_flow_mapping.update(mapping)
                     break
+        
+        # Add selective additional metrics
+        income_mapping.update(add_selective_additional_metrics(income_mapping, additional_income_statement_metrics, available_concepts, enhanced_fuzzy_matching))
+        balance_mapping.update(add_selective_additional_metrics(balance_mapping, additional_balance_sheet_metrics, available_concepts, enhanced_fuzzy_matching))
+        cash_flow_mapping.update(add_selective_additional_metrics(cash_flow_mapping, additional_cash_flow_metrics, available_concepts, enhanced_fuzzy_matching))
         
         # Create annual dataframes (from annual_data - 10-K filings)
         print(f"\nCreating annual financial statements...")
@@ -1589,49 +1673,111 @@ class SECFileSourcer:
     def _create_dataframe_from_data(self, data, mapping, period_type):
         """
         Create DataFrame from annual or quarterly data using concept mapping.
-        For any tag in data that is not mapped, create a new column in the DataFrame with the tag name, and fill it with the corresponding values.
+        Now includes comprehensive data validation to filter out non-financial data.
+        
         Args:
             data: Annual or quarterly data dictionary
             mapping: Dictionary mapping concept names to actual XBRL tags
             period_type: 'annual' or 'quarterly'
+            
         Returns:
-            pd.DataFrame: DataFrame with financial data
+            pd.DataFrame: DataFrame with validated financial data
+        """
+        return self._extract_and_validate_financial_data(data, mapping, period_type)
+
+    def _extract_and_validate_financial_data(self, data, mapping, period_type):
+        """
+        Extract financial data with comprehensive validation to filter out non-financial data.
+        
+        Args:
+            data: Annual or quarterly data dictionary
+            mapping: Dictionary mapping concept names to actual XBRL tags
+            period_type: 'annual' or 'quarterly'
+            
+        Returns:
+            pd.DataFrame: DataFrame with validated financial data
         """
         df_data = {}
         mapped_tags = set(mapping.values())
         
         # Collect all data points first, then filter by quarters
         all_data_points = []
+        validation_stats = {
+            'total_points': 0,
+            'valid_points': 0,
+            'rejected_points': 0,
+            'rejected_reasons': {}
+        }
         
-        # 1. Add mapped concepts
+        # 1. Add mapped concepts with validation
         for concept_name, actual_tag in mapping.items():
             if actual_tag in data:
                 for item in data[actual_tag]:
+                    validation_stats['total_points'] += 1
                     date = item['end_date']
+                    
                     try:
                         value = float(item['value'])
-                        all_data_points.append({
-                            'date': date,
-                            'concept': concept_name,
-                            'value': value
-                        })
+                        unit = item.get('unit', '')
+                        
+                        # Validate the data point
+                        if self._validate_financial_data(concept_name, value, unit):
+                            all_data_points.append({
+                                'date': date,
+                                'concept': concept_name,
+                                'value': value
+                            })
+                            validation_stats['valid_points'] += 1
+                        else:
+                            validation_stats['rejected_points'] += 1
+                            reason = f"Non-financial data: {concept_name} = {value}"
+                            validation_stats['rejected_reasons'][reason] = validation_stats['rejected_reasons'].get(reason, 0) + 1
+                            
                     except (ValueError, TypeError):
+                        validation_stats['rejected_points'] += 1
+                        reason = f"Invalid numeric value: {concept_name} = {item.get('value', 'N/A')}"
+                        validation_stats['rejected_reasons'][reason] = validation_stats['rejected_reasons'].get(reason, 0) + 1
                         continue
         
-        # 2. Add unmapped tags as their own columns
+        # 2. Add unmapped tags as their own columns (with validation)
         for tag in data:
             if tag not in mapped_tags:
                 for item in data[tag]:
+                    validation_stats['total_points'] += 1
                     date = item['end_date']
+                    
                     try:
                         value = float(item['value'])
-                        all_data_points.append({
-                            'date': date,
-                            'concept': tag,
-                            'value': value
-                        })
+                        unit = item.get('unit', '')
+                        
+                        # Validate the data point
+                        if self._validate_financial_data(tag, value, unit):
+                            all_data_points.append({
+                                'date': date,
+                                'concept': tag,
+                                'value': value
+                            })
+                            validation_stats['valid_points'] += 1
+                        else:
+                            validation_stats['rejected_points'] += 1
+                            reason = f"Non-financial data: {tag} = {value}"
+                            validation_stats['rejected_reasons'][reason] = validation_stats['rejected_reasons'].get(reason, 0) + 1
+                            
                     except (ValueError, TypeError):
+                        validation_stats['rejected_points'] += 1
+                        reason = f"Invalid numeric value: {tag} = {item.get('value', 'N/A')}"
+                        validation_stats['rejected_reasons'][reason] = validation_stats['rejected_reasons'].get(reason, 0) + 1
                         continue
+        
+        # Log validation statistics
+        if hasattr(self, 'progress_callback') and self.progress_callback:
+            self.progress_callback(f"    • Data validation: {validation_stats['valid_points']}/{validation_stats['total_points']} points passed validation")
+            if validation_stats['rejected_points'] > 0:
+                self.progress_callback(f"    • Rejected {validation_stats['rejected_points']} non-financial data points")
+                # Log top rejection reasons
+                top_reasons = sorted(validation_stats['rejected_reasons'].items(), key=lambda x: x[1], reverse=True)[:3]
+                for reason, count in top_reasons:
+                    self.progress_callback(f"      - {reason}: {count} occurrences")
         
         if all_data_points:
             # Sort by date (most recent first)
@@ -1823,6 +1969,114 @@ class SECFileSourcer:
             print(f"{name:12} : {details['quarters']:2d} quarters ({details['years']} years) - {details['description']}")
         print("=" * 60)
         print("Usage: create_financial_model(ticker, quarters=configs['medium_term']['quarters'])")
+
+    def _validate_financial_data(self, concept_name: str, value: float, unit: str = None) -> bool:
+        """
+        Validate that a data point represents actual financial amounts and not other types of data.
+        
+        Args:
+            concept_name: Name of the financial concept
+            value: The numeric value to validate
+            unit: The unit of measurement (if available)
+            
+        Returns:
+            bool: True if the data appears to be valid financial data, False otherwise
+        """
+        # Convert to string for pattern matching
+        value_str = str(value).lower()
+        concept_lower = concept_name.lower()
+        
+        # 1. Check for year/date patterns
+        year_patterns = [
+            r'^20\d{2}$',  # Years like 2023, 2024
+            r'^19\d{2}$',  # Years like 1999, 2000
+            r'^\d{4}$'     # Any 4-digit number that could be a year
+        ]
+        
+        for pattern in year_patterns:
+            if re.match(pattern, value_str):
+                return False
+        
+        # 2. Check for employee counts and headcount data
+        employee_indicators = [
+            'employee', 'headcount', 'personnel', 'staff', 'workforce',
+            'full-time', 'part-time', 'fte', 'head count'
+        ]
+        
+        for indicator in employee_indicators:
+            if indicator in concept_lower:
+                return False
+        
+        # 3. Check for percentage values (should be excluded from financial statements)
+        percentage_indicators = [
+            'percentage', 'percent', 'rate', 'ratio', 'margin', 'pct',
+            'growth rate', 'return on', 'roi', 'roe', 'roa'
+        ]
+        
+        for indicator in percentage_indicators:
+            if indicator in concept_lower:
+                return False
+        
+        # 4. Check for unit-based validation
+        if unit:
+            unit_lower = unit.lower()
+            # Reject non-monetary units
+            non_monetary_units = [
+                'shares', 'units', 'employees', 'people', 'customers',
+                'locations', 'stores', 'facilities', 'countries',
+                'percent', 'percentage', 'ratio', 'times', 'days'
+            ]
+            
+            for non_unit in non_monetary_units:
+                if non_unit in unit_lower:
+                    return False
+        
+        # 5. Check for suspicious value ranges
+        # Reject very small numbers that are likely percentages (0.01 to 0.99)
+        if 0.01 <= abs(value) <= 0.99:
+            # But allow if it's clearly a financial amount (millions, billions)
+            if abs(value) >= 1000000:  # Allow millions+
+                pass
+            else:
+                # Check if concept suggests it should be a percentage
+                percentage_concepts = ['margin', 'ratio', 'rate', 'return', 'growth']
+                if any(pc in concept_lower for pc in percentage_concepts):
+                    return False
+        
+        # 6. Check for count-based concepts
+        count_indicators = [
+            'number of', 'count of', 'total number', 'quantity',
+            'shares outstanding', 'common stock', 'preferred stock'
+        ]
+        
+        for indicator in count_indicators:
+            if indicator in concept_lower:
+                # Allow share counts but reject other counts
+                if 'share' in indicator and ('outstanding' in indicator or 'stock' in indicator):
+                    pass  # Allow share counts
+                else:
+                    return False
+        
+        # 7. Check for text-like values
+        if isinstance(value, str) and not value.replace('.', '').replace('-', '').isdigit():
+            return False
+        
+        # 8. Check for extreme values that might be errors
+        if abs(value) > 1e15:  # Values over 1 quadrillion are suspicious
+            return False
+        
+        # 9. Check for common non-financial concepts
+        non_financial_indicators = [
+            'age', 'duration', 'length', 'width', 'height', 'weight',
+            'temperature', 'speed', 'distance', 'area', 'volume',
+            'efficiency', 'productivity', 'satisfaction', 'score'
+        ]
+        
+        for indicator in non_financial_indicators:
+            if indicator in concept_lower:
+                return False
+        
+        return True
 
 # Example usage and testing
 if __name__ == "__main__":

@@ -7,6 +7,7 @@
 
 # Large data files
 *.xml
+*.xlsx
 *.csv
 *.json
 *.parquet
