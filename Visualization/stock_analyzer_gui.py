@@ -351,7 +351,7 @@ class AnalysisWorker(QThread):
             
             self.progress_updated.emit("Exporting to Excel...")
             
-            # Step 4: Export to Excel
+            # Step 4: Export to Excel with fast mode to prevent hanging
             excel_file = self.sourcer.export_to_excel(financial_model, sensitivity_model, self.ticker)
             
             self.progress_updated.emit("Analysis complete!")

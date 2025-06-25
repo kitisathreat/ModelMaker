@@ -820,17 +820,14 @@ class SECFileSourcer:
         filepath = os.path.join(storage_dir, filename)
 
         def write_formatted_statement(ws, df, section_title, start_row):
-            print(f"    Writing {section_title}...")
             bold_font = Font(bold=True)
             border = Border(bottom=Side(style='thin'))
             align_left = Alignment(horizontal='left')
-            
             # Section header
             ws.cell(row=start_row, column=1, value=section_title).font = bold_font
             ws.cell(row=start_row, column=1).border = border
             ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=df.shape[1]+1)
             row_idx = start_row + 1
-            
             # Header row
             ws.cell(row=row_idx, column=1, value="Line Item").font = bold_font
             for j, col in enumerate(df.columns, 2):
@@ -843,55 +840,35 @@ class SECFileSourcer:
                     except Exception:
                         pass
             row_idx += 1
-            
-            # Data rows - OPTIMIZED: Apply formatting in batches
-            print(f"      Processing {len(df)} rows...")
+            # Data rows
             for i, idx in enumerate(df.index):
-                if i % 100 == 0:  # Progress indicator every 100 rows
-                    print(f"        Processed {i}/{len(df)} rows...")
-                
                 ws.cell(row=row_idx, column=1, value=idx)
                 indent_level = get_indent(idx)
                 if indent_level > 0:
                     ws.cell(row=row_idx, column=1).alignment = Alignment(indent=indent_level)
                 else:
                     ws.cell(row=row_idx, column=1).alignment = align_left
-                
                 # Bold for parent categories
                 if idx in parent_map and parent_map[idx] is None:
                     ws.cell(row=row_idx, column=1).font = bold_font
-                
-                # OPTIMIZED: Write all values first, then apply formatting in batch
                 for j, col in enumerate(df.columns, 2):
                     val = df.loc[idx, col]
-                    ws.cell(row=row_idx, column=j, value=val)
-                
-                row_idx += 1
-            
-            # OPTIMIZED: Apply number formatting to entire column at once
-            print(f"      Applying number formatting...")
-            for j, col in enumerate(df.columns, 2):
-                # Apply number format to the entire column
-                for row in range(start_row + 2, row_idx):
-                    cell = ws.cell(row=row, column=j)
-                    if isinstance(cell.value, (int, float)):
+                    cell = ws.cell(row=row_idx, column=j, value=val)
+                    # Set number format for all value cells (no scientific notation)
+                    if isinstance(val, (int, float)):
                         cell.number_format = '#,##0'
-            
-            print(f"    Completed {section_title}")
+                row_idx += 1
+            # Add a blank row after section
             return row_idx + 1
 
         try:
-            print(f"Creating Excel workbook...")
             wb = openpyxl.Workbook()
             wb.remove(wb.active)
-            
             # Annual sheet
             annual_income = financial_model.get('annual_income_statement', pd.DataFrame())
             annual_balance = financial_model.get('annual_balance_sheet', pd.DataFrame())
             annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
-            
             if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
-                print(f"Creating Annual Financial Statements sheet...")
                 ws = wb.create_sheet('Annual Financial Statements')
                 row = 1
                 if not annual_income.empty:
@@ -900,14 +877,11 @@ class SECFileSourcer:
                     row = write_formatted_statement(ws, annual_balance.transpose(), "BALANCE SHEET", row)
                 if not annual_cash_flow.empty:
                     row = write_formatted_statement(ws, annual_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
-            
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
             quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
             quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
-            
             if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
-                print(f"Creating Quarterly Financial Statements sheet...")
                 ws = wb.create_sheet('Quarterly Financial Statements')
                 row = 1
                 if not quarterly_income.empty:
@@ -916,18 +890,13 @@ class SECFileSourcer:
                     row = write_formatted_statement(ws, quarterly_balance.transpose(), "BALANCE SHEET", row)
                 if not quarterly_cash_flow.empty:
                     row = write_formatted_statement(ws, quarterly_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
-            
-            # Write summary and sensitivity sheets
-            print(f"Creating sensitivity analysis sheets...")
+            # Write summary and sensitivity sheets as before
             for sheet_name, df in sensitivity_model.items():
                 if not df.empty:
-                    print(f"  Creating {sheet_name} sheet...")
                     ws = wb.create_sheet(sheet_name.replace('_', ' ').title())
                     for r in dataframe_to_rows(df, index=True, header=True):
                         ws.append(r)
-            
             # Write summary sheet
-            print(f"Creating Summary sheet...")
             summary_data = {
                 'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
                 'Value': [
@@ -941,16 +910,11 @@ class SECFileSourcer:
             ws = wb.create_sheet('Summary')
             for r in dataframe_to_rows(summary_df, index=False, header=True):
                 ws.append(r)
-            
-            print(f"Saving Excel file to: {filepath}")
             wb.save(filepath)
-            print(f"Financial model exported successfully!")
+            print(f"Financial model exported to: {filepath}")
             return filepath
-            
         except Exception as e:
             print(f"Error exporting to Excel: {e}")
-            import traceback
-            traceback.print_exc()
             return ""
 
     def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
@@ -1377,17 +1341,17 @@ class SECFileSourcer:
     def _create_dataframe_from_data(self, data, mapping, period_type):
         """
         Create DataFrame from annual or quarterly data using concept mapping.
-        
+        For any tag in data that is not mapped, create a new column in the DataFrame with the tag name, and fill it with the corresponding values.
         Args:
             data: Annual or quarterly data dictionary
             mapping: Dictionary mapping concept names to actual XBRL tags
             period_type: 'annual' or 'quarterly'
-            
         Returns:
             pd.DataFrame: DataFrame with financial data
         """
         df_data = {}
-        
+        mapped_tags = set(mapping.values())
+        # 1. Add mapped concepts as before
         for concept_name, actual_tag in mapping.items():
             if actual_tag in data:
                 for item in data[actual_tag]:
@@ -1395,15 +1359,25 @@ class SECFileSourcer:
                     try:
                         value = float(item['value'])
                         date_str = date.strftime('%Y-%m-%d')
-                        
                         if date_str not in df_data:
                             df_data[date_str] = {}
-                        
                         df_data[date_str][concept_name] = value
                     except (ValueError, TypeError):
-                        # Skip non-numeric values (like durations, text, etc.)
                         continue
-        
+        # 2. Add unmapped tags as their own columns
+        for tag in data:
+            if tag not in mapped_tags:
+                for item in data[tag]:
+                    date = item['end_date']
+                    try:
+                        value = float(item['value'])
+                        date_str = date.strftime('%Y-%m-%d')
+                        if date_str not in df_data:
+                            df_data[date_str] = {}
+                        # Use the tag as the column name for unmapped concepts
+                        df_data[date_str][tag] = value
+                    except (ValueError, TypeError):
+                        continue
         if df_data:
             df = pd.DataFrame.from_dict(df_data, orient='index')
             df.index = pd.to_datetime(df.index)
