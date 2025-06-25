@@ -289,6 +289,29 @@ class SECFileSourcer:
                     print(f"Annual data: {sum(len(data) for data in annual_data.values())} data points")
                     print(f"Quarterly data: {sum(len(data) for data in quarterly_data.values())} data points")
                     
+                    # Debug: Show keys and sample data in annual_data and quarterly_data
+                    print(f"\nannual_data keys: {list(annual_data.keys())[:10]}")
+                    if annual_data:
+                        first_key = next(iter(annual_data))
+                        print(f"Sample annual_data[{first_key}]: {annual_data[first_key][:2]}")
+                    print(f"\nquarterly_data keys: {list(quarterly_data.keys())[:10]}")
+                    if quarterly_data:
+                        first_key = next(iter(quarterly_data))
+                        print(f"Sample quarterly_data[{first_key}]: {quarterly_data[first_key][:2]}")
+                    
+                    # Debug: Check if the mapped tags exist in annual_data and quarterly_data
+                    print(f"\nChecking if mapped tags exist in separated data...")
+                    test_tags = ['us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap:GrossProfit', 'us-gaap:NetIncomeLoss']
+                    for tag in test_tags:
+                        in_annual = tag in annual_data
+                        in_quarterly = tag in quarterly_data
+                        in_comprehensive = tag in comprehensive_facts
+                        print(f"  {tag}: annual={in_annual}, quarterly={in_quarterly}, comprehensive={in_comprehensive}")
+                    
+                    # Debug: Show some financial tags from comprehensive_facts
+                    financial_tags = [tag for tag in comprehensive_facts.keys() if 'us-gaap:' in tag and any(term in tag.lower() for term in ['revenue', 'income', 'profit', 'assets', 'liabilities', 'cash'])]
+                    print(f"\nSample financial tags from comprehensive_facts: {financial_tags[:10]}")
+                    
                     # Run discrepancy checks between annual and quarterly data
                     print(f"\nRunning discrepancy checks...")
                     self._run_discrepancy_checks(annual_data, quarterly_data)
@@ -671,17 +694,12 @@ class SECFileSourcer:
                        sensitivity_model: Dict[str, pd.DataFrame], 
                        ticker: str, filename: str = None) -> str:
         """
-        Export financial models to Excel file with multiple sheets.
-        
-        Args:
-            financial_model (Dict[str, pd.DataFrame]): Base financial model
-            sensitivity_model (Dict[str, pd.DataFrame]): Sensitivity analysis model
-            ticker (str): Stock ticker symbol
-            filename (str): Output filename (optional)
-            
-        Returns:
-            str: Path to the exported Excel file
+        Export financial models to Excel file with professional formatting for annual and quarterly sheets.
         """
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, Border, Side
+        from openpyxl.utils.dataframe import dataframe_to_rows
+
         # Ensure the Storage directory exists
         storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
         os.makedirs(storage_dir, exist_ok=True)
@@ -689,38 +707,180 @@ class SECFileSourcer:
         if filename is None:
             filename = f"{ticker}_financial_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         filepath = os.path.join(storage_dir, filename)
-        
+
+        def write_formatted_statement(ws, df, section_title, start_row):
+            """Write a section (Income, Balance, Cash Flow) with formatting."""
+            bold_font = Font(bold=True)
+            border = Border(bottom=Side(style='thin'))
+            align_left = Alignment(horizontal='left')
+            indent = Alignment(indent=1)
+            # Section header
+            ws.cell(row=start_row, column=1, value=section_title).font = bold_font
+            ws.cell(row=start_row, column=1).border = border
+            ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=df.shape[1]+1)
+            row_idx = start_row + 1
+            # Header row
+            ws.cell(row=row_idx, column=1, value="Line Item").font = bold_font
+            for j, col in enumerate(df.columns, 2):
+                ws.cell(row=row_idx, column=j, value=str(col)).font = bold_font
+            row_idx += 1
+            # Data rows
+            for i, idx in enumerate(df.index):
+                ws.cell(row=row_idx, column=1, value=idx)
+                # Indent sub-items
+                if any(word in str(idx).lower() for word in ["total ", "net ", "ebitda", "gross profit", "operating income", "pretax", "equity", "liabilities", "assets", "cash flow"]):
+                    ws.cell(row=row_idx, column=1).font = bold_font
+                if any(word in str(idx).lower() for word in ["  ", "    "]):
+                    ws.cell(row=row_idx, column=1).alignment = indent
+                else:
+                    ws.cell(row=row_idx, column=1).alignment = align_left
+                for j, col in enumerate(df.columns, 2):
+                    val = df.loc[idx, col]
+                    ws.cell(row=row_idx, column=j, value=val)
+                row_idx += 1
+            # Add a blank row after section
+            return row_idx + 1
+
         try:
-            with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-                # Write base financial model sheets
-                for sheet_name, df in financial_model.items():
-                    if not df.empty:
-                        df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
-                
-                # Write sensitivity model sheets
-                for sheet_name, df in sensitivity_model.items():
-                    if not df.empty:
-                        df.to_excel(writer, sheet_name=f"{sheet_name.replace('_', ' ').title()}")
-                
-                # Write summary sheet
-                summary_data = {
-                    'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
-                    'Value': [
-                        ticker,
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        sum(len(df) for df in financial_model.values() if not df.empty),
-                        len(sensitivity_model.get('case_summary', pd.DataFrame()))
-                    ]
-                }
-                summary_df = pd.DataFrame(summary_data)
-                summary_df.to_excel(writer, sheet_name='Summary', index=False)
-            
+            wb = openpyxl.Workbook()
+            # Remove default sheet
+            wb.remove(wb.active)
+            # Annual sheet
+            annual_income = financial_model.get('annual_income_statement', pd.DataFrame())
+            annual_balance = financial_model.get('annual_balance_sheet', pd.DataFrame())
+            annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
+            if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
+                ws = wb.create_sheet('Annual Financial Statements')
+                row = 1
+                if not annual_income.empty:
+                    row = write_formatted_statement(ws, annual_income.transpose(), "INCOME STATEMENT", row)
+                if not annual_balance.empty:
+                    row = write_formatted_statement(ws, annual_balance.transpose(), "BALANCE SHEET", row)
+                if not annual_cash_flow.empty:
+                    row = write_formatted_statement(ws, annual_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
+            # Quarterly sheet
+            quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
+            quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
+            quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
+            if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
+                ws = wb.create_sheet('Quarterly Financial Statements')
+                row = 1
+                if not quarterly_income.empty:
+                    row = write_formatted_statement(ws, quarterly_income.transpose(), "INCOME STATEMENT", row)
+                if not quarterly_balance.empty:
+                    row = write_formatted_statement(ws, quarterly_balance.transpose(), "BALANCE SHEET", row)
+                if not quarterly_cash_flow.empty:
+                    row = write_formatted_statement(ws, quarterly_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
+            # Write summary and sensitivity sheets as before
+            for sheet_name, df in sensitivity_model.items():
+                if not df.empty:
+                    ws = wb.create_sheet(sheet_name.replace('_', ' ').title())
+                    for r in dataframe_to_rows(df, index=True, header=True):
+                        ws.append(r)
+            # Write summary sheet
+            summary_data = {
+                'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
+                'Value': [
+                    ticker,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    sum(len(df) for df in financial_model.values() if not df.empty),
+                    len(sensitivity_model.get('case_summary', pd.DataFrame()))
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            ws = wb.create_sheet('Summary')
+            for r in dataframe_to_rows(summary_df, index=False, header=True):
+                ws.append(r)
+            wb.save(filepath)
             print(f"Financial model exported to: {filepath}")
             return filepath
-            
         except Exception as e:
             print(f"Error exporting to Excel: {e}")
             return ""
+
+    def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
+        """
+        Create a vertically stacked financial statement with proper formatting.
+        
+        Args:
+            income_df: Income statement DataFrame
+            balance_df: Balance sheet DataFrame
+            cash_flow_df: Cash flow statement DataFrame
+            period_type: "Annual" or "Quarterly"
+            
+        Returns:
+            pd.DataFrame: Combined vertically stacked statement
+        """
+        # Define the order of line items for each statement
+        income_order = [
+            'Revenues', 'CostOfRevenue', 'GrossProfit', 'ResearchAndDevelopmentExpense',
+            'SellingGeneralAndAdministrativeExpense', 'OperatingExpenses', 'OperatingIncomeLoss',
+            'InterestExpense', 'InterestIncome', 'OtherIncomeExpense', 
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxes', 'IncomeTaxExpenseBenefit',
+            'NetIncomeLoss', 'EarningsPerShareBasic', 'EarningsPerShareDiluted',
+            'WeightedAverageNumberOfSharesOutstandingBasic', 'WeightedAverageNumberOfSharesOutstandingDiluted',
+            'DepreciationAndAmortization', 'StockBasedCompensationExpense', 'RestructuringCharges',
+            'ImpairmentCharges', 'GainLossOnSaleOfAssets', 'ForeignCurrencyGainLoss', 'OtherOperatingIncomeExpense'
+        ]
+        
+        balance_order = [
+            'CashAndCashEquivalents', 'ShortTermInvestments', 'AccountsReceivable', 'Inventory',
+            'PrepaidExpenses', 'TotalCurrentAssets', 'PropertyPlantAndEquipmentNet', 'Goodwill',
+            'IntangibleAssetsNet', 'LongTermInvestments', 'DeferredTaxAssets', 'OtherLongTermAssets',
+            'TotalAssets', 'AccountsPayable', 'AccruedExpenses', 'DeferredRevenue', 'ShortTermDebt',
+            'TotalCurrentLiabilities', 'LongTermDebt', 'DeferredTaxLiabilities', 'OtherLongTermLiabilities',
+            'TotalLiabilities', 'CommonStock', 'AdditionalPaidInCapital', 'RetainedEarnings',
+            'AccumulatedOtherComprehensiveIncomeLoss', 'TreasuryStock', 'TotalStockholdersEquity',
+            'TotalDebt', 'WorkingCapital', 'NetTangibleAssets'
+        ]
+        
+        cash_flow_order = [
+            'NetIncomeLoss', 'DepreciationAndAmortization', 'StockBasedCompensation', 'DeferredIncomeTaxes',
+            'ChangesInWorkingCapital', 'AccountsReceivable', 'Inventory', 'AccountsPayable', 'DeferredRevenue',
+            'OtherOperatingActivities', 'NetCashProvidedByUsedInOperatingActivities', 'CapitalExpenditures',
+            'Acquisitions', 'Investments', 'ProceedsFromInvestments', 'OtherInvestingActivities',
+            'NetCashProvidedByUsedInInvestingActivities', 'ProceedsFromDebt', 'RepaymentsOfDebt',
+            'DividendsPaid', 'StockRepurchases', 'ProceedsFromStockIssuance', 'OtherFinancingActivities',
+            'NetCashProvidedByUsedInFinancingActivities', 'EffectOfExchangeRateChanges', 'NetChangeInCash',
+            'CashAtBeginningOfPeriod', 'CashAtEndOfPeriod'
+        ]
+        
+        # Create combined DataFrame
+        combined_data = {}
+        
+        # Add income statement items
+        for item in income_order:
+            if item in income_df.columns:
+                for date in income_df.index:
+                    key = f"INCOME STATEMENT - {item}"
+                    if key not in combined_data:
+                        combined_data[key] = {}
+                    combined_data[key][date] = income_df.loc[date, item]
+        
+        # Add balance sheet items
+        for item in balance_order:
+            if item in balance_df.columns:
+                for date in balance_df.index:
+                    key = f"BALANCE SHEET - {item}"
+                    if key not in combined_data:
+                        combined_data[key] = {}
+                    combined_data[key][date] = balance_df.loc[date, item]
+        
+        # Add cash flow statement items
+        for item in cash_flow_order:
+            if item in cash_flow_df.columns:
+                for date in cash_flow_df.index:
+                    key = f"CASH FLOW - {item}"
+                    if key not in combined_data:
+                        combined_data[key] = {}
+                    combined_data[key][date] = cash_flow_df.loc[date, item]
+        
+        if combined_data:
+            combined_df = pd.DataFrame.from_dict(combined_data, orient='index')
+            combined_df = combined_df.sort_index()
+            return combined_df
+        else:
+            return pd.DataFrame()
 
     def _extract_xbrl_from_filing(self, filing_row, cik):
         """
@@ -790,7 +950,7 @@ class SECFileSourcer:
             print(f"Extracting facts from XBRL model...")
             for fact in model_xbrl.facts:
                 try:
-                    concept_name = fact.qname
+                    concept_name = str(fact.qname)
                     value = fact.value
                     context = fact.context
                     
@@ -896,7 +1056,7 @@ class SECFileSourcer:
         Create financial model from comprehensive 10-K and 10-Q data.
         
         Args:
-            comprehensive_facts: Combined facts from all filings
+            comprehensive_facts: Combined facts from all filings (used for fuzzy matching)
             annual_data: Annual data from 10-K filings
             quarterly_data: Quarterly data from 10-Q filings
             
@@ -912,62 +1072,160 @@ class SECFileSourcer:
             'quarterly_cash_flow': pd.DataFrame()
         }
         
-        # Define metrics
+        # Get all available concepts from comprehensive_facts for fuzzy matching
+        available_concepts = list(comprehensive_facts.keys())
+        print(f"\nUsing fuzzy matching to find {len(available_concepts)} available concepts...")
+        
+        # Define desired metrics with multiple possible tags for each concept
         income_statement_metrics = {
-            'Revenues': 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax',
-            'GrossProfit': 'us-gaap:GrossProfit',
-            'OperatingExpenses': 'us-gaap:OperatingExpenses',
-            'OperatingIncomeLoss': 'us-gaap:OperatingIncomeLoss',
-            'NetIncomeLoss': 'us-gaap:NetIncomeLoss',
-            'EarningsPerShareBasic': 'us-gaap:EarningsPerShareBasic',
-            'EarningsPerShareDiluted': 'us-gaap:EarningsPerShareDiluted'
+            'Revenues': ['us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap:Revenues', 'us-gaap:SalesRevenueNet'],
+            'CostOfRevenue': ['us-gaap:CostOfRevenue', 'us-gaap:CostOfGoodsAndServicesSold'],
+            'GrossProfit': ['us-gaap:GrossProfit', 'us-gaap:GrossProfitLoss'],
+            'ResearchAndDevelopmentExpense': ['us-gaap:ResearchAndDevelopmentExpense'],
+            'SellingGeneralAndAdministrativeExpense': ['us-gaap:SellingGeneralAndAdministrativeExpense'],
+            'OperatingExpenses': ['us-gaap:OperatingExpenses', 'us-gaap:OperatingExpense'],
+            'OperatingIncomeLoss': ['us-gaap:OperatingIncomeLoss', 'us-gaap:OperatingIncome'],
+            'InterestExpense': ['us-gaap:InterestExpense'],
+            'InterestIncome': ['us-gaap:InterestIncome'],
+            'OtherIncomeExpense': ['us-gaap:OtherIncomeExpense'],
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxes': ['us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest'],
+            'IncomeTaxExpenseBenefit': ['us-gaap:IncomeTaxExpenseBenefit'],
+            'NetIncomeLoss': ['us-gaap:NetIncomeLoss', 'us-gaap:NetIncomeLossAvailableToCommonStockholdersBasic'],
+            'EarningsPerShareBasic': ['us-gaap:EarningsPerShareBasic', 'us-gaap:EarningsPerShareBasicAndDiluted'],
+            'EarningsPerShareDiluted': ['us-gaap:EarningsPerShareDiluted'],
+            'WeightedAverageNumberOfSharesOutstandingBasic': ['us-gaap:WeightedAverageNumberOfSharesOutstandingBasic'],
+            'WeightedAverageNumberOfSharesOutstandingDiluted': ['us-gaap:WeightedAverageNumberOfSharesOutstandingDiluted'],
+            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
+            'StockBasedCompensationExpense': ['us-gaap:ShareBasedCompensationArrangementByShareBasedPaymentAwardExpense'],
+            'RestructuringCharges': ['us-gaap:RestructuringCharges'],
+            'ImpairmentCharges': ['us-gaap:ImpairmentOfIntangibleAssetsIndefinitelivedExcludingGoodwill'],
+            'GainLossOnSaleOfAssets': ['us-gaap:GainLossOnSaleOfPropertyPlantEquipment'],
+            'ForeignCurrencyGainLoss': ['us-gaap:ForeignCurrencyTransactionGainLossBeforeTax'],
+            'OtherOperatingIncomeExpense': ['us-gaap:OtherOperatingIncomeExpenseNet']
         }
         
         balance_sheet_metrics = {
-            'CashAndCashEquivalents': 'us-gaap:CashAndCashEquivalentsAtCarryingValue',
-            'TotalAssets': 'us-gaap:Assets',
-            'TotalCurrentAssets': 'us-gaap:AssetsCurrent',
-            'TotalLiabilities': 'us-gaap:Liabilities',
-            'TotalCurrentLiabilities': 'us-gaap:LiabilitiesCurrent',
-            'TotalStockholdersEquity': 'us-gaap:StockholdersEquity',
-            'TotalDebt': 'us-gaap:LongTermDebtNoncurrent'
+            'CashAndCashEquivalents': ['us-gaap:CashAndCashEquivalentsAtCarryingValue', 'us-gaap:CashAndCashEquivalents'],
+            'ShortTermInvestments': ['us-gaap:AvailableForSaleSecuritiesCurrent'],
+            'AccountsReceivable': ['us-gaap:AccountsReceivableNetCurrent'],
+            'Inventory': ['us-gaap:InventoryNet'],
+            'PrepaidExpenses': ['us-gaap:PrepaidExpenseAndOtherAssetsCurrent'],
+            'TotalCurrentAssets': ['us-gaap:AssetsCurrent', 'us-gaap:CurrentAssets'],
+            'PropertyPlantAndEquipmentNet': ['us-gaap:PropertyPlantAndEquipmentNet'],
+            'Goodwill': ['us-gaap:Goodwill'],
+            'IntangibleAssetsNet': ['us-gaap:IntangibleAssetsNetExcludingGoodwill'],
+            'LongTermInvestments': ['us-gaap:AvailableForSaleSecuritiesNoncurrent'],
+            'DeferredTaxAssets': ['us-gaap:DeferredTaxAssetsNet'],
+            'OtherLongTermAssets': ['us-gaap:OtherAssetsNoncurrent'],
+            'TotalAssets': ['us-gaap:Assets', 'us-gaap:AssetsTotal'],
+            'AccountsPayable': ['us-gaap:AccountsPayableCurrent'],
+            'AccruedExpenses': ['us-gaap:AccruedLiabilitiesCurrent'],
+            'DeferredRevenue': ['us-gaap:ContractWithCustomerLiabilityCurrent'],
+            'ShortTermDebt': ['us-gaap:ShortTermBorrowings'],
+            'TotalCurrentLiabilities': ['us-gaap:LiabilitiesCurrent', 'us-gaap:CurrentLiabilities'],
+            'LongTermDebt': ['us-gaap:LongTermDebtNoncurrent', 'us-gaap:LongTermDebt'],
+            'DeferredTaxLiabilities': ['us-gaap:DeferredTaxLiabilitiesNet'],
+            'OtherLongTermLiabilities': ['us-gaap:OtherLiabilitiesNoncurrent'],
+            'TotalLiabilities': ['us-gaap:Liabilities', 'us-gaap:LiabilitiesTotal'],
+            'CommonStock': ['us-gaap:CommonStockValue'],
+            'AdditionalPaidInCapital': ['us-gaap:AdditionalPaidInCapital'],
+            'RetainedEarnings': ['us-gaap:RetainedEarningsAccumulatedDeficit'],
+            'AccumulatedOtherComprehensiveIncomeLoss': ['us-gaap:AccumulatedOtherComprehensiveIncomeLossNetOfTax'],
+            'TreasuryStock': ['us-gaap:TreasuryStockValue'],
+            'TotalStockholdersEquity': ['us-gaap:StockholdersEquity', 'us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],
+            'TotalDebt': ['us-gaap:LongTermDebtNoncurrent', 'us-gaap:LongTermDebt'],
+            'WorkingCapital': ['us-gaap:WorkingCapital'],
+            'NetTangibleAssets': ['us-gaap:NetTangibleAssets']
         }
         
         cash_flow_metrics = {
-            'NetCashProvidedByUsedInOperatingActivities': 'us-gaap:NetCashProvidedByUsedInOperatingActivities',
-            'NetCashProvidedByUsedInInvestingActivities': 'us-gaap:NetCashProvidedByUsedInInvestingActivities',
-            'NetCashProvidedByUsedInFinancingActivities': 'us-gaap:NetCashProvidedByUsedInFinancingActivities',
-            'CapitalExpenditures': 'us-gaap:PaymentsToAcquirePropertyPlantAndEquipment',
-            'DividendsPaid': 'us-gaap:Dividends'
+            'NetIncomeLoss': ['us-gaap:NetIncomeLoss'],
+            'DepreciationAndAmortization': ['us-gaap:DepreciationAndAmortization'],
+            'StockBasedCompensation': ['us-gaap:ShareBasedCompensationArrangementByShareBasedPaymentAwardExpense'],
+            'DeferredIncomeTaxes': ['us-gaap:DeferredIncomeTaxExpenseBenefit'],
+            'ChangesInWorkingCapital': ['us-gaap:IncreaseDecreaseInOperatingCapital'],
+            'AccountsReceivable': ['us-gaap:IncreaseDecreaseInAccountsReceivable'],
+            'Inventory': ['us-gaap:IncreaseDecreaseInInventories'],
+            'AccountsPayable': ['us-gaap:IncreaseDecreaseInAccountsPayable'],
+            'DeferredRevenue': ['us-gaap:IncreaseDecreaseInContractWithCustomerLiability'],
+            'OtherOperatingActivities': ['us-gaap:OtherOperatingActivitiesCashFlowStatement'],
+            'NetCashProvidedByUsedInOperatingActivities': ['us-gaap:NetCashProvidedByUsedInOperatingActivities'],
+            'CapitalExpenditures': ['us-gaap:PaymentsToAcquirePropertyPlantAndEquipment', 'us-gaap:CapitalExpenditures'],
+            'Acquisitions': ['us-gaap:PaymentsToAcquireBusinessesNetOfCashAcquired'],
+            'Investments': ['us-gaap:PurchasesOfAvailableForSaleSecurities'],
+            'ProceedsFromInvestments': ['us-gaap:ProceedsFromMaturitiesPrepaymentsAndCallsOfAvailableForSaleSecurities'],
+            'OtherInvestingActivities': ['us-gaap:OtherInvestingActivitiesCashFlowStatement'],
+            'NetCashProvidedByUsedInInvestingActivities': ['us-gaap:NetCashProvidedByUsedInInvestingActivities'],
+            'ProceedsFromDebt': ['us-gaap:ProceedsFromIssuanceOfLongTermDebt'],
+            'RepaymentsOfDebt': ['us-gaap:RepaymentsOfLongTermDebt'],
+            'DividendsPaid': ['us-gaap:Dividends', 'us-gaap:DividendsPaid'],
+            'StockRepurchases': ['us-gaap:PaymentsForRepurchaseOfCommonStock'],
+            'ProceedsFromStockIssuance': ['us-gaap:ProceedsFromIssuanceOfCommonStock'],
+            'OtherFinancingActivities': ['us-gaap:OtherFinancingActivitiesCashFlowStatement'],
+            'NetCashProvidedByUsedInFinancingActivities': ['us-gaap:NetCashProvidedByUsedInFinancingActivities'],
+            'EffectOfExchangeRateChanges': ['us-gaap:EffectOfExchangeRateOnCashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
+            'NetChangeInCash': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsPeriodIncreaseDecreaseIncludingExchangeRateEffect'],
+            'CashAtBeginningOfPeriod': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
+            'CashAtEndOfPeriod': ['us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents']
         }
         
-        # Create annual dataframes (from 10-K data)
-        for statement, metrics in [('income_statement', income_statement_metrics),
-                                 ('balance_sheet', balance_sheet_metrics),
-                                 ('cash_flow', cash_flow_metrics)]:
+        # Create mappings for each statement type using comprehensive_facts
+        print(f"\nMatching income statement concepts...")
+        income_mapping = {}
+        for concept_name, possible_tags in income_statement_metrics.items():
+            for tag in possible_tags:
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                if mapping:
+                    income_mapping.update(mapping)
+                    break
+        
+        print(f"\nMatching balance sheet concepts...")
+        balance_mapping = {}
+        for concept_name, possible_tags in balance_sheet_metrics.items():
+            for tag in possible_tags:
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                if mapping:
+                    balance_mapping.update(mapping)
+                    break
+        
+        print(f"\nMatching cash flow concepts...")
+        cash_flow_mapping = {}
+        for concept_name, possible_tags in cash_flow_metrics.items():
+            for tag in possible_tags:
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                if mapping:
+                    cash_flow_mapping.update(mapping)
+                    break
+        
+        # Create annual dataframes (from annual_data - 10-K filings)
+        print(f"\nCreating annual financial statements...")
+        for statement, mapping in [('income_statement', income_mapping),
+                                 ('balance_sheet', balance_mapping),
+                                 ('cash_flow', cash_flow_mapping)]:
             
-            df = self._create_dataframe_from_data(annual_data, metrics, 'annual')
+            df = self._create_dataframe_from_data(annual_data, mapping, 'annual')
             financial_model[f'annual_{statement}'] = df
             print(f"Annual {statement}: {len(df)} rows extracted")
         
-        # Create quarterly dataframes (from 10-Q data)
-        for statement, metrics in [('income_statement', income_statement_metrics),
-                                 ('balance_sheet', balance_sheet_metrics),
-                                 ('cash_flow', cash_flow_metrics)]:
+        # Create quarterly dataframes (from quarterly_data - 10-Q filings)
+        print(f"\nCreating quarterly financial statements...")
+        for statement, mapping in [('income_statement', income_mapping),
+                                 ('balance_sheet', balance_mapping),
+                                 ('cash_flow', cash_flow_mapping)]:
             
-            df = self._create_dataframe_from_data(quarterly_data, metrics, 'quarterly')
+            df = self._create_dataframe_from_data(quarterly_data, mapping, 'quarterly')
             financial_model[f'quarterly_{statement}'] = df
             print(f"Quarterly {statement}: {len(df)} rows extracted")
         
         return financial_model
 
-    def _create_dataframe_from_data(self, data, metrics, period_type):
+    def _create_dataframe_from_data(self, data, mapping, period_type):
         """
-        Create DataFrame from annual or quarterly data.
+        Create DataFrame from annual or quarterly data using concept mapping.
         
         Args:
             data: Annual or quarterly data dictionary
-            metrics: Metrics dictionary
+            mapping: Dictionary mapping concept names to actual XBRL tags
             period_type: 'annual' or 'quarterly'
             
         Returns:
@@ -975,17 +1233,21 @@ class SECFileSourcer:
         """
         df_data = {}
         
-        for metric_name, sec_tag in metrics.items():
-            if sec_tag in data:
-                for item in data[sec_tag]:
+        for concept_name, actual_tag in mapping.items():
+            if actual_tag in data:
+                for item in data[actual_tag]:
                     date = item['end_date']
-                    value = float(item['value'])
-                    date_str = date.strftime('%Y-%m-%d')
-                    
-                    if date_str not in df_data:
-                        df_data[date_str] = {}
-                    
-                    df_data[date_str][metric_name] = value
+                    try:
+                        value = float(item['value'])
+                        date_str = date.strftime('%Y-%m-%d')
+                        
+                        if date_str not in df_data:
+                            df_data[date_str] = {}
+                        
+                        df_data[date_str][concept_name] = value
+                    except (ValueError, TypeError):
+                        # Skip non-numeric values (like durations, text, etc.)
+                        continue
         
         if df_data:
             df = pd.DataFrame.from_dict(df_data, orient='index')
@@ -994,6 +1256,78 @@ class SECFileSourcer:
             return df
         else:
             return pd.DataFrame()
+
+    def _fuzzy_match_concepts(self, desired_concepts: Dict[str, str], available_concepts: List[str], 
+                             similarity_threshold: float = 0.6) -> Dict[str, str]:
+        """
+        Use fuzzy matching to find the best matches between desired XBRL concepts and available concepts.
+        
+        Args:
+            desired_concepts: Dictionary of concept names to their desired XBRL tags
+            available_concepts: List of actual XBRL concepts found in the data
+            similarity_threshold: Minimum similarity score (0-1) to consider a match
+            
+        Returns:
+            Dict[str, str]: Mapping of concept names to actual XBRL tags found
+        """
+        concept_mapping = {}
+        
+        for concept_name, desired_tag in desired_concepts.items():
+            best_match = None
+            best_score = 0
+            
+            # Extract the main part of the desired tag (after us-gaap:)
+            desired_main = desired_tag.split(':')[-1] if ':' in desired_tag else desired_tag
+            
+            for available_concept in available_concepts:
+                # Convert QName to string if needed
+                if hasattr(available_concept, 'localName'):
+                    available_concept_str = str(available_concept)
+                else:
+                    available_concept_str = str(available_concept)
+                
+                # Extract the main part of the available concept
+                available_main = available_concept_str.split(':')[-1] if ':' in available_concept_str else available_concept_str
+                
+                # Calculate similarity using different methods
+                # 1. Exact match
+                if available_concept_str == desired_tag:
+                    best_match = available_concept_str
+                    best_score = 1.0
+                    break
+                
+                # 2. Main part exact match
+                if available_main == desired_main:
+                    best_match = available_concept_str
+                    best_score = 0.95
+                    break
+                
+                # 3. Sequence matcher similarity
+                similarity = SequenceMatcher(None, available_main.lower(), desired_main.lower()).ratio()
+                
+                # 4. Check if one contains the other
+                if desired_main.lower() in available_main.lower() or available_main.lower() in desired_main.lower():
+                    similarity = max(similarity, 0.8)
+                
+                # 5. Check for common financial terms
+                financial_terms = ['revenue', 'income', 'profit', 'loss', 'assets', 'liabilities', 'equity', 'cash', 'debt']
+                desired_terms = [term for term in financial_terms if term in desired_main.lower()]
+                available_terms = [term for term in financial_terms if term in available_main.lower()]
+                
+                if desired_terms and available_terms and any(term in available_terms for term in desired_terms):
+                    similarity = max(similarity, 0.7)
+                
+                if similarity > best_score:
+                    best_score = similarity
+                    best_match = available_concept_str
+            
+            if best_score >= similarity_threshold:
+                concept_mapping[concept_name] = best_match
+                print(f"  Mapped '{concept_name}' ({desired_tag}) -> '{best_match}' (score: {best_score:.2f})")
+            else:
+                print(f"  No good match found for '{concept_name}' ({desired_tag}), best was '{best_match}' (score: {best_score:.2f})")
+        
+        return concept_mapping
 
 # Example usage and testing
 if __name__ == "__main__":
