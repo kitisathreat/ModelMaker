@@ -157,12 +157,15 @@ class SECFileSourcer:
             print(f"Error in find_sec_filings: {str(e)}")
             return pd.DataFrame()
     
-    def create_financial_model(self, ticker: str) -> Dict[str, pd.DataFrame]:
+    def create_financial_model(self, ticker: str, quarters: int = 8) -> Dict[str, pd.DataFrame]:
         """
         Create a traditional financial three-statement model with annual and quarterly views.
         
         Args:
             ticker (str): Stock ticker symbol
+            quarters (int): Number of quarters of data to retrieve (default: 8, which is 2 years)
+                          This will determine how many 10-K and 10-Q filings to process.
+                          For example: 4 quarters = 1 year, 8 quarters = 2 years, 12 quarters = 3 years
             
         Returns:
             Dict[str, pd.DataFrame]: Dictionary containing financial model dataframes
@@ -237,9 +240,17 @@ class SECFileSourcer:
                         print(f"No filings found for {ticker}")
                         return financial_model
                     
+                    # Calculate how many filings we need based on quarters parameter
+                    years_needed = max(1, (quarters + 3) // 4)  # Round up to get full years needed
+                    k_filings_needed = years_needed  # One 10-K per year
+                    q_filings_needed = quarters  # One 10-Q per quarter
+                    
+                    print(f"Requested {quarters} quarters of data ({years_needed} years)")
+                    print(f"Will process up to {k_filings_needed} 10-K filings and {q_filings_needed} 10-Q filings")
+                    
                     # Separate 10-K and 10-Q filings
-                    k_filings = filings_df[filings_df['form'] == '10-K'].head(2)  # Get 2 most recent 10-Ks
-                    q_filings = filings_df[filings_df['form'] == '10-Q'].head(8)  # Get 8 most recent 10-Qs
+                    k_filings = filings_df[filings_df['form'] == '10-K'].head(k_filings_needed)
+                    q_filings = filings_df[filings_df['form'] == '10-Q'].head(q_filings_needed)
                     
                     print(f"Found {len(k_filings)} 10-K filings and {len(q_filings)} 10-Q filings")
                     print(f"Starting comprehensive data extraction...")
@@ -394,13 +405,14 @@ class SECFileSourcer:
             return pd.DataFrame()
     
     def create_sensitivity_model(self, financial_model: Dict[str, pd.DataFrame], 
-                               ticker: str) -> Dict[str, pd.DataFrame]:
+                               ticker: str, quarters: int = 8) -> Dict[str, pd.DataFrame]:
         """
         Create a sensitivity analysis model with operating leverage impacts.
         
         Args:
             financial_model (Dict[str, pd.DataFrame]): Base financial model
             ticker (str): Stock ticker symbol
+            quarters (int): Number of quarters used in the financial model (for reference)
             
         Returns:
             Dict[str, pd.DataFrame]: Dictionary containing sensitivity analysis dataframes
@@ -697,8 +709,107 @@ class SECFileSourcer:
         Export financial models to Excel file with professional formatting for annual and quarterly sheets.
         """
         import openpyxl
-        from openpyxl.styles import Font, Alignment, Border, Side
+        from openpyxl.styles import Font, Alignment, Border, Side, NamedStyle
         from openpyxl.utils.dataframe import dataframe_to_rows
+        from openpyxl.styles.numbers import FORMAT_NUMBER_COMMA_SEPARATED1
+
+        # Parent-child mapping for indentation
+        parent_map = {
+            # Income Statement
+            'Revenues': None,
+            'CostOfRevenue': 'Revenues',
+            'GrossProfit': None,
+            'ResearchAndDevelopmentExpense': 'OperatingExpenses',
+            'SellingGeneralAndAdministrativeExpense': 'OperatingExpenses',
+            'OperatingExpenses': None,
+            'OperatingIncomeLoss': None,
+            'InterestExpense': 'OperatingIncomeLoss',
+            'InterestIncome': 'OperatingIncomeLoss',
+            'OtherIncomeExpense': 'OperatingIncomeLoss',
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxes': None,
+            'IncomeTaxExpenseBenefit': 'IncomeLossFromContinuingOperationsBeforeIncomeTaxes',
+            'NetIncomeLoss': None,
+            'EarningsPerShareBasic': 'NetIncomeLoss',
+            'EarningsPerShareDiluted': 'NetIncomeLoss',
+            'WeightedAverageNumberOfSharesOutstandingBasic': 'NetIncomeLoss',
+            'WeightedAverageNumberOfSharesOutstandingDiluted': 'NetIncomeLoss',
+            'DepreciationAndAmortization': 'OperatingExpenses',
+            'StockBasedCompensationExpense': 'OperatingExpenses',
+            'RestructuringCharges': 'OperatingExpenses',
+            'ImpairmentCharges': 'OperatingExpenses',
+            'GainLossOnSaleOfAssets': 'OtherIncomeExpense',
+            'ForeignCurrencyGainLoss': 'OtherIncomeExpense',
+            'OtherOperatingIncomeExpense': 'OperatingExpenses',
+            # Balance Sheet
+            'CashAndCashEquivalents': 'TotalCurrentAssets',
+            'ShortTermInvestments': 'TotalCurrentAssets',
+            'AccountsReceivable': 'TotalCurrentAssets',
+            'Inventory': 'TotalCurrentAssets',
+            'PrepaidExpenses': 'TotalCurrentAssets',
+            'TotalCurrentAssets': None,
+            'PropertyPlantAndEquipmentNet': 'FixedAssets',
+            'Goodwill': 'OtherLongTermAssets',
+            'IntangibleAssetsNet': 'OtherLongTermAssets',
+            'LongTermInvestments': 'OtherLongTermAssets',
+            'DeferredTaxAssets': 'OtherLongTermAssets',
+            'OtherLongTermAssets': 'OtherLongTermAssets',
+            'TotalAssets': None,
+            'AccountsPayable': 'TotalCurrentLiabilities',
+            'AccruedExpenses': 'TotalCurrentLiabilities',
+            'DeferredRevenue': 'TotalCurrentLiabilities',
+            'ShortTermDebt': 'TotalCurrentLiabilities',
+            'TotalCurrentLiabilities': None,
+            'LongTermDebt': 'LongTermLiabilities',
+            'DeferredTaxLiabilities': 'LongTermLiabilities',
+            'OtherLongTermLiabilities': 'LongTermLiabilities',
+            'TotalLiabilities': None,
+            'CommonStock': 'TotalStockholdersEquity',
+            'AdditionalPaidInCapital': 'TotalStockholdersEquity',
+            'RetainedEarnings': 'TotalStockholdersEquity',
+            'AccumulatedOtherComprehensiveIncomeLoss': 'TotalStockholdersEquity',
+            'TreasuryStock': 'TotalStockholdersEquity',
+            'TotalStockholdersEquity': None,
+            'TotalDebt': 'LongTermLiabilities',
+            'WorkingCapital': None,
+            'NetTangibleAssets': None,
+            # Cash Flow
+            'NetIncomeLoss': None,
+            'DepreciationAndAmortization': 'NetCashProvidedByUsedInOperatingActivities',
+            'StockBasedCompensation': 'NetCashProvidedByUsedInOperatingActivities',
+            'DeferredIncomeTaxes': 'NetCashProvidedByUsedInOperatingActivities',
+            'ChangesInWorkingCapital': 'NetCashProvidedByUsedInOperatingActivities',
+            'AccountsReceivable': 'ChangesInWorkingCapital',
+            'Inventory': 'ChangesInWorkingCapital',
+            'AccountsPayable': 'ChangesInWorkingCapital',
+            'DeferredRevenue': 'ChangesInWorkingCapital',
+            'OtherOperatingActivities': 'NetCashProvidedByUsedInOperatingActivities',
+            'NetCashProvidedByUsedInOperatingActivities': None,
+            'CapitalExpenditures': 'NetCashProvidedByUsedInInvestingActivities',
+            'Acquisitions': 'NetCashProvidedByUsedInInvestingActivities',
+            'Investments': 'NetCashProvidedByUsedInInvestingActivities',
+            'ProceedsFromInvestments': 'NetCashProvidedByUsedInInvestingActivities',
+            'OtherInvestingActivities': 'NetCashProvidedByUsedInInvestingActivities',
+            'NetCashProvidedByUsedInInvestingActivities': None,
+            'ProceedsFromDebt': 'NetCashProvidedByUsedInFinancingActivities',
+            'RepaymentsOfDebt': 'NetCashProvidedByUsedInFinancingActivities',
+            'DividendsPaid': 'NetCashProvidedByUsedInFinancingActivities',
+            'StockRepurchases': 'NetCashProvidedByUsedInFinancingActivities',
+            'ProceedsFromStockIssuance': 'NetCashProvidedByUsedInFinancingActivities',
+            'OtherFinancingActivities': 'NetCashProvidedByUsedInFinancingActivities',
+            'NetCashProvidedByUsedInFinancingActivities': None,
+            'EffectOfExchangeRateChanges': None,
+            'NetChangeInCash': None,
+            'CashAtBeginningOfPeriod': None,
+            'CashAtEndOfPeriod': None
+        }
+
+        def get_indent(line_item):
+            indent = 0
+            parent = parent_map.get(line_item)
+            while parent:
+                indent += 1
+                parent = parent_map.get(parent)
+            return indent
 
         # Ensure the Storage directory exists
         storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
@@ -709,47 +820,78 @@ class SECFileSourcer:
         filepath = os.path.join(storage_dir, filename)
 
         def write_formatted_statement(ws, df, section_title, start_row):
-            """Write a section (Income, Balance, Cash Flow) with formatting."""
+            print(f"    Writing {section_title}...")
             bold_font = Font(bold=True)
             border = Border(bottom=Side(style='thin'))
             align_left = Alignment(horizontal='left')
-            indent = Alignment(indent=1)
+            
             # Section header
             ws.cell(row=start_row, column=1, value=section_title).font = bold_font
             ws.cell(row=start_row, column=1).border = border
             ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=df.shape[1]+1)
             row_idx = start_row + 1
+            
             # Header row
             ws.cell(row=row_idx, column=1, value="Line Item").font = bold_font
             for j, col in enumerate(df.columns, 2):
                 ws.cell(row=row_idx, column=j, value=str(col)).font = bold_font
+                # Format date columns as mmm-yyyy
+                if isinstance(col, (str, pd.Timestamp)):
+                    try:
+                        dt = pd.to_datetime(col)
+                        ws.cell(row=row_idx, column=j).number_format = 'mmm-yyyy'
+                    except Exception:
+                        pass
             row_idx += 1
-            # Data rows
+            
+            # Data rows - OPTIMIZED: Apply formatting in batches
+            print(f"      Processing {len(df)} rows...")
             for i, idx in enumerate(df.index):
+                if i % 100 == 0:  # Progress indicator every 100 rows
+                    print(f"        Processed {i}/{len(df)} rows...")
+                
                 ws.cell(row=row_idx, column=1, value=idx)
-                # Indent sub-items
-                if any(word in str(idx).lower() for word in ["total ", "net ", "ebitda", "gross profit", "operating income", "pretax", "equity", "liabilities", "assets", "cash flow"]):
-                    ws.cell(row=row_idx, column=1).font = bold_font
-                if any(word in str(idx).lower() for word in ["  ", "    "]):
-                    ws.cell(row=row_idx, column=1).alignment = indent
+                indent_level = get_indent(idx)
+                if indent_level > 0:
+                    ws.cell(row=row_idx, column=1).alignment = Alignment(indent=indent_level)
                 else:
                     ws.cell(row=row_idx, column=1).alignment = align_left
+                
+                # Bold for parent categories
+                if idx in parent_map and parent_map[idx] is None:
+                    ws.cell(row=row_idx, column=1).font = bold_font
+                
+                # OPTIMIZED: Write all values first, then apply formatting in batch
                 for j, col in enumerate(df.columns, 2):
                     val = df.loc[idx, col]
                     ws.cell(row=row_idx, column=j, value=val)
+                
                 row_idx += 1
-            # Add a blank row after section
+            
+            # OPTIMIZED: Apply number formatting to entire column at once
+            print(f"      Applying number formatting...")
+            for j, col in enumerate(df.columns, 2):
+                # Apply number format to the entire column
+                for row in range(start_row + 2, row_idx):
+                    cell = ws.cell(row=row, column=j)
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0'
+            
+            print(f"    Completed {section_title}")
             return row_idx + 1
 
         try:
+            print(f"Creating Excel workbook...")
             wb = openpyxl.Workbook()
-            # Remove default sheet
             wb.remove(wb.active)
+            
             # Annual sheet
             annual_income = financial_model.get('annual_income_statement', pd.DataFrame())
             annual_balance = financial_model.get('annual_balance_sheet', pd.DataFrame())
             annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
+            
             if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
+                print(f"Creating Annual Financial Statements sheet...")
                 ws = wb.create_sheet('Annual Financial Statements')
                 row = 1
                 if not annual_income.empty:
@@ -758,11 +900,14 @@ class SECFileSourcer:
                     row = write_formatted_statement(ws, annual_balance.transpose(), "BALANCE SHEET", row)
                 if not annual_cash_flow.empty:
                     row = write_formatted_statement(ws, annual_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
+            
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
             quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
             quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
+            
             if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
+                print(f"Creating Quarterly Financial Statements sheet...")
                 ws = wb.create_sheet('Quarterly Financial Statements')
                 row = 1
                 if not quarterly_income.empty:
@@ -771,13 +916,18 @@ class SECFileSourcer:
                     row = write_formatted_statement(ws, quarterly_balance.transpose(), "BALANCE SHEET", row)
                 if not quarterly_cash_flow.empty:
                     row = write_formatted_statement(ws, quarterly_cash_flow.transpose(), "CASH FLOW STATEMENT", row)
-            # Write summary and sensitivity sheets as before
+            
+            # Write summary and sensitivity sheets
+            print(f"Creating sensitivity analysis sheets...")
             for sheet_name, df in sensitivity_model.items():
                 if not df.empty:
+                    print(f"  Creating {sheet_name} sheet...")
                     ws = wb.create_sheet(sheet_name.replace('_', ' ').title())
                     for r in dataframe_to_rows(df, index=True, header=True):
                         ws.append(r)
+            
             # Write summary sheet
+            print(f"Creating Summary sheet...")
             summary_data = {
                 'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
                 'Value': [
@@ -791,11 +941,16 @@ class SECFileSourcer:
             ws = wb.create_sheet('Summary')
             for r in dataframe_to_rows(summary_df, index=False, header=True):
                 ws.append(r)
+            
+            print(f"Saving Excel file to: {filepath}")
             wb.save(filepath)
-            print(f"Financial model exported to: {filepath}")
+            print(f"Financial model exported successfully!")
             return filepath
+            
         except Exception as e:
             print(f"Error exporting to Excel: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
 
     def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
@@ -1174,7 +1329,7 @@ class SECFileSourcer:
         income_mapping = {}
         for concept_name, possible_tags in income_statement_metrics.items():
             for tag in possible_tags:
-                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85)
                 if mapping:
                     income_mapping.update(mapping)
                     break
@@ -1183,7 +1338,7 @@ class SECFileSourcer:
         balance_mapping = {}
         for concept_name, possible_tags in balance_sheet_metrics.items():
             for tag in possible_tags:
-                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85)
                 if mapping:
                     balance_mapping.update(mapping)
                     break
@@ -1192,7 +1347,7 @@ class SECFileSourcer:
         cash_flow_mapping = {}
         for concept_name, possible_tags in cash_flow_metrics.items():
             for tag in possible_tags:
-                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.5)
+                mapping = self._fuzzy_match_concepts({concept_name: tag}, available_concepts, similarity_threshold=0.85)
                 if mapping:
                     cash_flow_mapping.update(mapping)
                     break
@@ -1258,7 +1413,7 @@ class SECFileSourcer:
             return pd.DataFrame()
 
     def _fuzzy_match_concepts(self, desired_concepts: Dict[str, str], available_concepts: List[str], 
-                             similarity_threshold: float = 0.6) -> Dict[str, str]:
+                             similarity_threshold: float = 0.85) -> Dict[str, str]:
         """
         Use fuzzy matching to find the best matches between desired XBRL concepts and available concepts.
         
@@ -1329,14 +1484,73 @@ class SECFileSourcer:
         
         return concept_mapping
 
+    def get_quarter_configurations(self) -> Dict[str, Dict[str, int]]:
+        """
+        Get predefined quarter configurations for different analysis periods.
+        
+        Returns:
+            Dict[str, Dict[str, int]]: Dictionary of configuration names to their details
+        """
+        return {
+            "short_term": {
+                "quarters": 4,
+                "years": 1,
+                "description": "1 year of data - good for recent performance analysis"
+            },
+            "medium_term": {
+                "quarters": 8,
+                "years": 2,
+                "description": "2 years of data - balanced view for most analyses"
+            },
+            "long_term": {
+                "quarters": 12,
+                "years": 3,
+                "description": "3 years of data - good for trend analysis"
+            },
+            "extended": {
+                "quarters": 16,
+                "years": 4,
+                "description": "4 years of data - comprehensive historical view"
+            },
+            "maximum": {
+                "quarters": 20,
+                "years": 5,
+                "description": "5 years of data - maximum recommended for performance"
+            }
+        }
+    
+    def print_quarter_configurations(self):
+        """
+        Print available quarter configurations with descriptions.
+        """
+        configs = self.get_quarter_configurations()
+        print("\nAvailable Quarter Configurations:")
+        print("=" * 60)
+        for name, details in configs.items():
+            print(f"{name:12} : {details['quarters']:2d} quarters ({details['years']} years) - {details['description']}")
+        print("=" * 60)
+        print("Usage: create_financial_model(ticker, quarters=configs['medium_term']['quarters'])")
+
 # Example usage and testing
 if __name__ == "__main__":
     sourcer = SECFileSourcer()
+    
+    # Show available configurations
+    sourcer.print_quarter_configurations()
+    
     # Use command-line arguments if provided, otherwise default to AAPL
     if len(sys.argv) > 1:
         tickers = [arg.upper() for arg in sys.argv[1:]]
     else:
         tickers = ["AAPL"]  # Default to Apple for testing
+
+    # Get quarter configurations
+    configs = sourcer.get_quarter_configurations()
+    
+    # Use medium_term (8 quarters) as default, but users can modify this
+    quarters_to_use = configs["medium_term"]["quarters"]
+    
+    print(f"\nUsing {quarters_to_use} quarters of data ({quarters_to_use//4} years)")
 
     for ticker in tickers:
         print(f"\n{'='*40}\nTesting for ticker: {ticker}\n{'='*40}")
@@ -1346,11 +1560,11 @@ if __name__ == "__main__":
         if not filings.empty:
             print("Recent filings:")
             print(filings.head())
-        print(f"\nCreating financial model for {ticker}...")
-        financial_model = sourcer.create_financial_model(ticker)
+        print(f"\nCreating financial model for {ticker} with {quarters_to_use} quarters of data...")
+        financial_model = sourcer.create_financial_model(ticker, quarters=quarters_to_use)
         if any(not df.empty for df in financial_model.values()):
             print(f"\nCreating sensitivity analysis for {ticker}...")
-            sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker)
+            sensitivity_model = sourcer.create_sensitivity_model(financial_model, ticker, quarters=quarters_to_use)
             excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
             print(f"\nModel creation complete! Check the Excel file: {excel_file}")
         else:
