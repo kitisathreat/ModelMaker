@@ -635,7 +635,7 @@ class RedTintOverlay(QWidget):
         self.cpu_percent = 0
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_cpu_usage)
-        self.timer.start(100)  # Update every 100ms
+        self.timer.start(50)  # Update every 100ms
         self.setVisible(False)
         
         # Set up the overlay to cover the entire parent window
@@ -648,6 +648,7 @@ class RedTintOverlay(QWidget):
         # Track mouse position for exclusion zone
         self.mouse_pos = QPoint(0, 0)
         self.exclusion_radius = 100  # 100 pixel radius exclusion zone
+        self.mouse_in_window = False  # Track if mouse is in window
         
         try:
             import psutil
@@ -665,10 +666,23 @@ class RedTintOverlay(QWidget):
     
     def mouseMoveEvent(self, event):
         """Track mouse position for exclusion zone."""
-        self.mouse_pos = event.pos()
-        self.update()  # Redraw to update exclusion zone
+        if self.mouse_in_window:
+            self.mouse_pos = event.pos()
+            self.update()  # Redraw to update exclusion zone
         # Pass the event to parent widgets
         event.ignore()
+    
+    def enterEvent(self, event):
+        """Handle mouse entering the window."""
+        self.mouse_in_window = True
+        self.update()  # Redraw to show exclusion zone
+        event.accept()
+    
+    def leaveEvent(self, event):
+        """Handle mouse leaving the window."""
+        self.mouse_in_window = False
+        self.update()  # Redraw to hide exclusion zone
+        event.accept()
     
     def mousePressEvent(self, event):
         """Pass mouse press events through to underlying widgets."""
@@ -709,17 +723,17 @@ class RedTintOverlay(QWidget):
         # Fill the entire widget with the red tint
         painter.fillRect(self.rect(), red_tint)
         
-        # Create exclusion zone around mouse cursor
-        if base_opacity > 0:
+        # Create exclusion zone around mouse cursor with 100% transparency
+        if base_opacity > 0 and self.mouse_in_window:
             # Create a circular path for the exclusion zone
             exclusion_path = QPainterPath()
             exclusion_path.addEllipse(self.mouse_pos, self.exclusion_radius, self.exclusion_radius)
             
-            # Set composition mode to clear the exclusion zone
+            # Set composition mode to clear the exclusion zone completely
             painter.setCompositionMode(QPainter.CompositionMode_Clear)
             
-            # Clear the circular area around the mouse
-            painter.fillPath(exclusion_path, Qt.transparent)
+            # Clear the circular area around the mouse to 100% transparency
+            painter.fillPath(exclusion_path, QColor(0, 0, 0, 0))  # Fully transparent black
         
         painter.end()
     

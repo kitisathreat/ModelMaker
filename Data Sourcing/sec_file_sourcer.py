@@ -258,6 +258,9 @@ class SECFileSourcer:
                         financial_model[f'{period}_{statement}'] = df
                 
                 progress("    ✓ Financial model created from SEC API data")
+                # Enforce required structure on income statements before returning
+                financial_model['annual_income_statement'] = self._enforce_income_statement_structure(financial_model.get('annual_income_statement', pd.DataFrame()))
+                financial_model['quarterly_income_statement'] = self._enforce_income_statement_structure(financial_model.get('quarterly_income_statement', pd.DataFrame()))
                 return financial_model
             else:
                 progress(f"    ⚠ SEC API not available (status: {response.status_code}), falling back to XBRL parsing...")
@@ -338,6 +341,9 @@ class SECFileSourcer:
                     financial_model = self._create_model_from_comprehensive_data(comprehensive_facts, annual_data, quarterly_data, enhanced_fuzzy_matching, progress_callback)
                     
                     progress("    ✓ Comprehensive financial model created successfully!")
+                    # Enforce required structure on income statements before returning
+                    financial_model['annual_income_statement'] = self._enforce_income_statement_structure(financial_model.get('annual_income_statement', pd.DataFrame()))
+                    financial_model['quarterly_income_statement'] = self._enforce_income_statement_structure(financial_model.get('quarterly_income_statement', pd.DataFrame()))
                     return financial_model
                     
                 except Exception as e:
@@ -3993,6 +3999,72 @@ class SECFileSourcer:
         
         progress(f"    ✓ Excel file with formatted titles saved: {filepath}")
         return filepath
+
+    def _enforce_income_statement_structure(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Ensure the DataFrame contains all required income statement line items and structure.
+        Adds missing rows, enforces order, and adds section/parent info for formatting.
+        """
+        import numpy as np
+        # Define required line items and their order
+        required_order = [
+            # Revenue section
+            'Revenue',
+            'Product Revenue',
+            'Service Revenue',
+            'Total revenue',
+            # Operating expenses
+            'Operating expenses',
+            'Cost of Goods Sold',
+            'Corporate Expenses',
+            'SG&A',
+            # Other Expenses
+            'Other Expenses',
+            'Operating Income (EBITDA)',
+            'Depreciation and Amortization',
+            'Interest Expense',
+            'Tax Expense',
+            'Net Income',
+            'EPS (Basic)',
+            'EPS (Diluted)'
+        ]
+        # Parent/section mapping for indentation/formatting
+        parent_map = {
+            'Product Revenue': 'Revenue',
+            'Service Revenue': 'Revenue',
+            'Total revenue': 'Revenue',
+            'Cost of Goods Sold': 'Operating expenses',
+            'Corporate Expenses': 'Operating expenses',
+            'SG&A': 'Operating expenses',
+            'Operating expenses': None,
+            'Other Expenses': None,
+            'Depreciation and Amortization': 'Other Expenses',
+            'Interest Expense': 'Other Expenses',
+            'Tax Expense': 'Other Expenses',
+            'Operating Income (EBITDA)': None,
+            'Net Income': None,
+            'EPS (Basic)': 'Net Income',
+            'EPS (Diluted)': 'Net Income',
+            'Revenue': None
+        }
+        # Create a new DataFrame with all required rows
+        new_rows = []
+        for item in required_order:
+            if item in df.index:
+                row = df.loc[item].copy()
+            else:
+                # Fill missing with NaN or 0
+                row = pd.Series({col: np.nan for col in df.columns})
+            row['Section'] = parent_map.get(item) or item
+            row['Parent'] = parent_map.get(item)
+            new_rows.append((item, row))
+        # Build the new DataFrame
+        new_df = pd.DataFrame({k: v for k, v in new_rows}).T
+        new_df.index.name = 'Line Item'
+        return new_df
+
+    # --- PATCH create_financial_model to enforce structure before returning ---
+    # (Find both SEC API and XBRL fallback return points)
 
 # Example usage and testing
 if __name__ == "__main__":
