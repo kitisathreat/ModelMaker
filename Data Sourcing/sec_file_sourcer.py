@@ -786,13 +786,19 @@ class SECFileSourcer:
                 progress("    • Writing annual financial statements...")
                 startrow = 0
                 if not annual_income.empty:
-                    annual_income.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_annual_income = self._remove_empty_columns(annual_income.transpose())
+                    cleaned_annual_income.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
                     startrow += annual_income.shape[1] + 3
                 if not annual_balance.empty:
-                    annual_balance.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_annual_balance = self._remove_empty_columns(annual_balance.transpose())
+                    cleaned_annual_balance.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
                     startrow += annual_balance.shape[1] + 3
                 if not annual_cash_flow.empty:
-                    annual_cash_flow.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_annual_cash_flow = self._remove_empty_columns(annual_cash_flow.transpose())
+                    cleaned_annual_cash_flow.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
             
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
@@ -802,19 +808,27 @@ class SECFileSourcer:
                 progress("    • Writing quarterly financial statements...")
                 startrow = 0
                 if not quarterly_income.empty:
-                    quarterly_income.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_quarterly_income = self._remove_empty_columns(quarterly_income.transpose())
+                    cleaned_quarterly_income.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
                     startrow += quarterly_income.shape[1] + 3
                 if not quarterly_balance.empty:
-                    quarterly_balance.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_quarterly_balance = self._remove_empty_columns(quarterly_balance.transpose())
+                    cleaned_quarterly_balance.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
                     startrow += quarterly_balance.shape[1] + 3
                 if not quarterly_cash_flow.empty:
-                    quarterly_cash_flow.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                    # Remove empty columns before writing to Excel
+                    cleaned_quarterly_cash_flow = self._remove_empty_columns(quarterly_cash_flow.transpose())
+                    cleaned_quarterly_cash_flow.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
             
             # Sensitivity and summary sheets
             progress("    • Writing sensitivity analysis and summary sheets...")
             for sheet_name, df in sensitivity_model.items():
                 if not df.empty:
-                    df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
+                    # Remove empty columns before writing to Excel
+                    cleaned_df = self._remove_empty_columns(df)
+                    cleaned_df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
             
             # Summary sheet
             summary_data = {
@@ -874,91 +888,73 @@ class SECFileSourcer:
             if sheet in wb.sheetnames:
                 ws = wb[sheet]
                 
-                # Find the Line Item column
+                # Find the key columns
                 line_item_col = None
+                section_heading_col = None
+                parent_col = None
+                aggregate_col = None
+                
                 for idx, cell in enumerate(ws[1]):
                     if cell.value == 'Line Item':
                         line_item_col = idx + 1
-                        break
+                    elif cell.value == 'is_section_heading':
+                        section_heading_col = idx + 1
+                    elif cell.value == 'parent':
+                        parent_col = idx + 1
+                    elif cell.value == 'is_aggregate':
+                        aggregate_col = idx + 1
                 
                 if line_item_col is None:
                     continue
                 
-                # Bold headers
-                for row in ws.iter_rows(min_row=1, max_row=1):
-                    for cell in row:
-                        cell.font = Font(bold=True)
-                
                 # Apply formatting to each row
-                def format_row(row_num):
+                for row_num in range(2, ws.max_row + 1):
                     line_item_cell = ws.cell(row=row_num, column=line_item_col)
                     line_item_value = line_item_cell.value
                     
                     if line_item_value is None:
-                        return
+                        continue
                     
-                    # Bold section headings (INCOME STATEMENT, BALANCE SHEET, CASH FLOW STATEMENT)
-                    if line_item_value in ['INCOME STATEMENT', 'BALANCE SHEET', 'CASH FLOW STATEMENT']:
+                    # Check if this is a section heading
+                    is_section_heading = False
+                    if section_heading_col:
+                        section_heading_cell = ws.cell(row=row_num, column=section_heading_col)
+                        is_section_heading = section_heading_cell.value == True or section_heading_cell.value == 'True'
+                    
+                    # Check if this is an aggregator
+                    is_aggregate = False
+                    if aggregate_col:
+                        aggregate_cell = ws.cell(row=row_num, column=aggregate_col)
+                        is_aggregate = aggregate_cell.value == True or aggregate_cell.value == 'True'
+                    
+                    # Check if this has a parent (for indentation)
+                    has_parent = False
+                    if parent_col:
+                        parent_cell = ws.cell(row=row_num, column=parent_col)
+                        has_parent = parent_cell.value is not None and parent_cell.value != ''
+                    
+                    # Apply formatting based on flags
+                    if is_section_heading:
+                        # Bold for section headings (INCOME STATEMENT, BALANCE SHEET, CASH FLOW STATEMENT)
                         line_item_cell.font = Font(bold=True, size=12)
                         line_item_cell.alignment = Alignment(horizontal='left')
-                        return
-                    
-                    # Determine if this is an aggregate/total line item
-                    is_aggregate = False
-                    indent_level = 0
-                    
-                    # Check if it's an aggregate based on the line item name
-                    aggregate_keywords = ['total', 'net', 'gross', 'income', 'earnings', 'operating income', 'cash at end']
-                    if any(keyword in line_item_value.lower() for keyword in aggregate_keywords):
-                        is_aggregate = True
-                    
-                    # Determine indent level based on parent-child relationships
-                    parent_map = self._create_user_friendly_parent_map()
-                    
-                    # Find the technical concept name for this friendly title
-                    technical_concept = None
-                    for tech_name, friendly_name in self._create_user_friendly_title_mapping().items():
-                        if friendly_name == line_item_value:
-                            technical_concept = tech_name
-                            break
-                    
-                    if technical_concept and technical_concept in parent_map:
-                        parent = parent_map[technical_concept]
-                        if parent is not None:
-                            indent_level = 1
-                            # Check if parent has a parent (for deeper nesting)
-                            if parent in parent_map and parent_map[parent] is not None:
-                                indent_level = 2
-                    
-                    # Apply formatting
-                    if is_aggregate and indent_level == 0:
-                        # Bold and italic for main totals
-                        line_item_cell.font = Font(bold=True, italic=True)
                     elif is_aggregate:
-                        # Just italic for subtotals
+                        # Italic for aggregator line items
                         line_item_cell.font = Font(italic=True)
-                    elif indent_level > 0:
-                        # Regular font with indentation for subcategories
+                        if has_parent:
+                            # Indent child aggregators
+                            line_item_cell.alignment = Alignment(indent=1)
+                        else:
+                            # No indentation for top-level aggregators
+                            line_item_cell.alignment = Alignment(indent=0)
+                    elif has_parent:
+                        # Regular font with indentation for child line items
                         line_item_cell.font = Font()
-                        line_item_cell.alignment = Alignment(indent=indent_level)
+                        line_item_cell.alignment = Alignment(indent=1)
                     else:
                         # Regular font for main line items
                         line_item_cell.font = Font()
-                
-                # Apply formatting to all rows
-                rows = list(range(2, ws.max_row + 1))
-                if schmoove_mode and n_jobs > 1:
-                    progress("    • Applying formatting with parallel processing...")
-                    try:
-                        from joblib import Parallel, delayed
-                        Parallel(n_jobs=n_jobs)(delayed(format_row)(row_num) for row_num in rows)
-                    except ImportError:
-                        # Fallback to sequential processing
-                        for row_num in rows:
-                            format_row(row_num)
-                else:
-                    for row_num in rows:
-                        format_row(row_num)
+                        line_item_cell.alignment = Alignment(indent=0)
                 
                 # Auto-adjust column widths
                 for column in ws.columns:
@@ -1043,6 +1039,10 @@ class SECFileSourcer:
             if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
                 progress("    • Writing annual financial statements...")
                 stacked_annual = self._create_vertically_stacked_statement(annual_income, annual_balance, annual_cash_flow, period_type="Annual")
+                # Remove empty columns before writing to Excel
+                stacked_annual = self._remove_empty_columns(stacked_annual)
+                # Remove formatting columns before writing to Excel
+                stacked_annual = self._remove_formatting_columns(stacked_annual)
                 stacked_annual.to_excel(writer, sheet_name='Annual Financial Statements', index=False)
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
@@ -1051,12 +1051,18 @@ class SECFileSourcer:
             if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
                 progress("    • Writing quarterly financial statements...")
                 stacked_quarterly = self._create_vertically_stacked_statement(quarterly_income, quarterly_balance, quarterly_cash_flow, period_type="Quarterly")
+                # Remove empty columns before writing to Excel
+                stacked_quarterly = self._remove_empty_columns(stacked_quarterly)
+                # Remove formatting columns before writing to Excel
+                stacked_quarterly = self._remove_formatting_columns(stacked_quarterly)
                 stacked_quarterly.to_excel(writer, sheet_name='Quarterly Financial Statements', index=False)
             # Sensitivity and summary sheets
             progress("    • Writing sensitivity analysis and summary sheets...")
             for sheet_name, df in sensitivity_model.items():
                 if not df.empty:
-                    df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
+                    # Remove empty columns before writing to Excel
+                    cleaned_df = self._remove_empty_columns(df)
+                    cleaned_df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
             # Summary sheet
             summary_data = {
                 'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed'],
@@ -1079,8 +1085,9 @@ class SECFileSourcer:
             if sheet in wb.sheetnames:
                 ws = wb[sheet]
                 
-                # Find the Line Item column
+                # Find the key columns
                 line_item_col = None
+                
                 for idx, cell in enumerate(ws[1]):
                     if cell.value == 'Line Item':
                         line_item_col = idx + 1
@@ -1089,7 +1096,7 @@ class SECFileSourcer:
                 if line_item_col is None:
                     continue
                 
-                # Apply formatting to each row
+                # Apply formatting to each row based on line item content
                 for row_num in range(2, ws.max_row + 1):
                     line_item_cell = ws.cell(row=row_num, column=line_item_col)
                     line_item_value = line_item_cell.value
@@ -1097,54 +1104,19 @@ class SECFileSourcer:
                     if line_item_value is None:
                         continue
                     
-                    # Bold section headings (INCOME STATEMENT, BALANCE SHEET, CASH FLOW STATEMENT)
-                    if line_item_value in ['INCOME STATEMENT', 'BALANCE SHEET', 'CASH FLOW STATEMENT']:
+                    # Apply formatting based on line item content
+                    if line_item_value.upper() in ['INCOME STATEMENT', 'BALANCE SHEET', 'CASH FLOW STATEMENT']:
+                        # Bold for section headings
                         line_item_cell.font = Font(bold=True, size=12)
                         line_item_cell.alignment = Alignment(horizontal='left')
-                        continue
-                    
-                    # Determine if this is an aggregate/total line item
-                    is_aggregate = False
-                    indent_level = 0
-                    
-                    # Check if it's an aggregate based on the line item name
-                    aggregate_keywords = ['total', 'net', 'gross', 'income', 'earnings', 'operating income', 'cash at end']
-                    if any(keyword in line_item_value.lower() for keyword in aggregate_keywords):
-                        is_aggregate = True
-                    
-                    # Determine indent level based on parent-child relationships
-                    # This is a simplified approach - in practice, you might want to use the parent_map
-                    parent_map = self._create_user_friendly_parent_map()
-                    
-                    # Find the technical concept name for this friendly title
-                    technical_concept = None
-                    for tech_name, friendly_name in self._create_user_friendly_title_mapping().items():
-                        if friendly_name == line_item_value:
-                            technical_concept = tech_name
-                            break
-                    
-                    if technical_concept and technical_concept in parent_map:
-                        parent = parent_map[technical_concept]
-                        if parent is not None:
-                            indent_level = 1
-                            # Check if parent has a parent (for deeper nesting)
-                            if parent in parent_map and parent_map[parent] is not None:
-                                indent_level = 2
-                    
-                    # Apply formatting
-                    if is_aggregate and indent_level == 0:
-                        # Bold and italic for main totals
-                        line_item_cell.font = Font(bold=True, italic=True)
-                    elif is_aggregate:
-                        # Just italic for subtotals
+                    elif any(keyword in line_item_value for keyword in ['Total', 'Net', 'Gross', 'Income', 'Earnings', 'Cash at End']):
+                        # Italic for aggregator line items
                         line_item_cell.font = Font(italic=True)
-                    elif indent_level > 0:
-                        # Regular font with indentation for subcategories
-                        line_item_cell.font = Font()
-                        line_item_cell.alignment = Alignment(indent=indent_level)
+                        line_item_cell.alignment = Alignment(indent=0)
                     else:
                         # Regular font for main line items
                         line_item_cell.font = Font()
+                        line_item_cell.alignment = Alignment(indent=0)
                 
                 # Auto-adjust column widths
                 for column in ws.columns:
@@ -1173,98 +1145,98 @@ class SECFileSourcer:
         """
         import pandas as pd
         
-        # Define the order and structure for each statement
+        # Define the order and structure for each statement with proper parent-child relationships
         income_order = [
             ('Revenue', None),
             ('CostOfGoodsSold', 'Revenue'),
             ('GrossProfit', None),
-            ('ResearchAndDevelopmentExpense', 'OperatingExpenses'),
-            ('SellingGeneralAndAdministrativeExpense', 'OperatingExpenses'),
-            ('DepreciationAndAmortization', 'OperatingExpenses'),
-            ('StockBasedCompensationExpense', 'OperatingExpenses'),
-            ('RestructuringCharges', 'OperatingExpenses'),
-            ('ImpairmentCharges', 'OperatingExpenses'),
-            ('OtherOperatingExpenses', 'OperatingExpenses'),
+            ('ResearchAndDevelopmentExpense', 'Operating Expenses'),
+            ('SellingGeneralAndAdministrativeExpense', 'Operating Expenses'),
+            ('DepreciationAndAmortization', 'Operating Expenses'),
+            ('StockBasedCompensationExpense', 'Operating Expenses'),
+            ('RestructuringCharges', 'Operating Expenses'),
+            ('ImpairmentCharges', 'Operating Expenses'),
+            ('OtherOperatingExpenses', 'Operating Expenses'),
             ('OperatingExpenses', None),  # subtotal
             ('OperatingIncome', None),  # total
-            ('InterestIncome', 'NonOperatingIncome'),
-            ('InterestExpense', 'NonOperatingIncome'),
-            ('GainLossOnSaleOfAssets', 'NonOperatingIncome'),
-            ('ForeignCurrencyGainLoss', 'NonOperatingIncome'),
-            ('OtherIncomeExpense', 'NonOperatingIncome'),
+            ('InterestIncome', 'Non-Operating Income'),
+            ('InterestExpense', 'Non-Operating Income'),
+            ('GainLossOnSaleOfAssets', 'Non-Operating Income'),
+            ('ForeignCurrencyGainLoss', 'Non-Operating Income'),
+            ('OtherIncomeExpense', 'Non-Operating Income'),
             ('NonOperatingIncome', None),  # subtotal
             ('IncomeBeforeTaxes', None),
-            ('IncomeTaxExpense', 'IncomeBeforeTaxes'),
+            ('IncomeTaxExpense', 'Income Before Taxes'),
             ('NetIncome', None),
-            ('EarningsPerShareBasic', 'NetIncome'),
-            ('EarningsPerShareDiluted', 'NetIncome'),
-            ('WeightedAverageSharesBasic', 'NetIncome'),
-            ('WeightedAverageSharesDiluted', 'NetIncome'),
+            ('EarningsPerShareBasic', 'Net Income'),
+            ('EarningsPerShareDiluted', 'Net Income'),
+            ('WeightedAverageSharesBasic', 'Net Income'),
+            ('WeightedAverageSharesDiluted', 'Net Income'),
         ]
         balance_order = [
-            ('CashAndCashEquivalents', 'CurrentAssets'),
-            ('ShortTermInvestments', 'CurrentAssets'),
-            ('AccountsReceivable', 'CurrentAssets'),
-            ('Inventory', 'CurrentAssets'),
-            ('PrepaidExpenses', 'CurrentAssets'),
-            ('OtherCurrentAssets', 'CurrentAssets'),
+            ('CashAndCashEquivalents', 'Current Assets'),
+            ('ShortTermInvestments', 'Current Assets'),
+            ('AccountsReceivable', 'Current Assets'),
+            ('Inventory', 'Current Assets'),
+            ('PrepaidExpenses', 'Current Assets'),
+            ('OtherCurrentAssets', 'Current Assets'),
             ('TotalCurrentAssets', None),
-            ('PropertyPlantAndEquipmentNet', 'NonCurrentAssets'),
-            ('Goodwill', 'NonCurrentAssets'),
-            ('IntangibleAssetsNet', 'NonCurrentAssets'),
-            ('LongTermInvestments', 'NonCurrentAssets'),
-            ('DeferredTaxAssets', 'NonCurrentAssets'),
-            ('OtherLongTermAssets', 'NonCurrentAssets'),
+            ('PropertyPlantAndEquipmentNet', 'Non-Current Assets'),
+            ('Goodwill', 'Non-Current Assets'),
+            ('IntangibleAssetsNet', 'Non-Current Assets'),
+            ('LongTermInvestments', 'Non-Current Assets'),
+            ('DeferredTaxAssets', 'Non-Current Assets'),
+            ('OtherLongTermAssets', 'Non-Current Assets'),
             ('TotalNonCurrentAssets', None),
             ('TotalAssets', None),
-            ('AccountsPayable', 'CurrentLiabilities'),
-            ('AccruedExpenses', 'CurrentLiabilities'),
-            ('DeferredRevenue', 'CurrentLiabilities'),
-            ('ShortTermDebt', 'CurrentLiabilities'),
-            ('OtherCurrentLiabilities', 'CurrentLiabilities'),
+            ('AccountsPayable', 'Current Liabilities'),
+            ('AccruedExpenses', 'Current Liabilities'),
+            ('DeferredRevenue', 'Current Liabilities'),
+            ('ShortTermDebt', 'Current Liabilities'),
+            ('OtherCurrentLiabilities', 'Current Liabilities'),
             ('TotalCurrentLiabilities', None),
-            ('LongTermDebt', 'NonCurrentLiabilities'),
-            ('DeferredTaxLiabilities', 'NonCurrentLiabilities'),
-            ('OtherLongTermLiabilities', 'NonCurrentLiabilities'),
+            ('LongTermDebt', 'Non-Current Liabilities'),
+            ('DeferredTaxLiabilities', 'Non-Current Liabilities'),
+            ('OtherLongTermLiabilities', 'Non-Current Liabilities'),
             ('TotalNonCurrentLiabilities', None),
             ('TotalLiabilities', None),
-            ('CommonStock', 'StockholdersEquity'),
-            ('AdditionalPaidInCapital', 'StockholdersEquity'),
-            ('RetainedEarnings', 'StockholdersEquity'),
-            ('AccumulatedOtherComprehensiveIncome', 'StockholdersEquity'),
-            ('TreasuryStock', 'StockholdersEquity'),
+            ('CommonStock', 'Stockholders\' Equity'),
+            ('AdditionalPaidInCapital', 'Stockholders\' Equity'),
+            ('RetainedEarnings', 'Stockholders\' Equity'),
+            ('AccumulatedOtherComprehensiveIncome', 'Stockholders\' Equity'),
+            ('TreasuryStock', 'Stockholders\' Equity'),
             ('TotalStockholdersEquity', None),
             ('WorkingCapital', None),
             ('TotalDebt', None),
         ]
         cash_flow_order = [
             ('NetIncome', None),  # This will be consolidated with Income Statement Net Income
-            ('DepreciationAndAmortization', 'OperatingAdjustments'),
-            ('StockBasedCompensation', 'OperatingAdjustments'),
-            ('DeferredIncomeTaxes', 'OperatingAdjustments'),
+            ('DepreciationAndAmortization', 'Operating Adjustments'),
+            ('StockBasedCompensation', 'Operating Adjustments'),
+            ('DeferredIncomeTaxes', 'Operating Adjustments'),
             ('OperatingAdjustments', None),
-            ('ChangeInAccountsReceivable', 'WorkingCapitalChanges'),
-            ('ChangeInInventory', 'WorkingCapitalChanges'),
-            ('ChangeInAccountsPayable', 'WorkingCapitalChanges'),
-            ('ChangeInDeferredRevenue', 'WorkingCapitalChanges'),
-            ('ChangeInOtherWorkingCapital', 'WorkingCapitalChanges'),
+            ('ChangeInAccountsReceivable', 'Working Capital Changes'),
+            ('ChangeInInventory', 'Working Capital Changes'),
+            ('ChangeInAccountsPayable', 'Working Capital Changes'),
+            ('ChangeInDeferredRevenue', 'Working Capital Changes'),
+            ('ChangeInOtherWorkingCapital', 'Working Capital Changes'),
             ('WorkingCapitalChanges', None),
-            ('OtherOperatingActivities', 'OperatingActivities'),
+            ('OtherOperatingActivities', 'Operating Activities'),
             ('OperatingActivities', None),
             ('NetCashFromOperatingActivities', None),
-            ('CapitalExpenditures', 'InvestingActivities'),
-            ('Acquisitions', 'InvestingActivities'),
-            ('Investments', 'InvestingActivities'),
-            ('ProceedsFromInvestments', 'InvestingActivities'),
-            ('OtherInvestingActivities', 'InvestingActivities'),
+            ('CapitalExpenditures', 'Investing Activities'),
+            ('Acquisitions', 'Investing Activities'),
+            ('Investments', 'Investing Activities'),
+            ('ProceedsFromInvestments', 'Investing Activities'),
+            ('OtherInvestingActivities', 'Investing Activities'),
             ('InvestingActivities', None),
             ('NetCashFromInvestingActivities', None),
-            ('ProceedsFromDebt', 'FinancingActivities'),
-            ('RepaymentsOfDebt', 'FinancingActivities'),
-            ('DividendsPaid', 'FinancingActivities'),
-            ('StockRepurchases', 'FinancingActivities'),
-            ('ProceedsFromStockIssuance', 'FinancingActivities'),
-            ('OtherFinancingActivities', 'FinancingActivities'),
+            ('ProceedsFromDebt', 'Financing Activities'),
+            ('RepaymentsOfDebt', 'Financing Activities'),
+            ('DividendsPaid', 'Financing Activities'),
+            ('StockRepurchases', 'Financing Activities'),
+            ('ProceedsFromStockIssuance', 'Financing Activities'),
+            ('OtherFinancingActivities', 'Financing Activities'),
             ('FinancingActivities', None),
             ('NetCashFromFinancingActivities', None),
             ('EffectOfExchangeRateChanges', None),
@@ -1276,7 +1248,7 @@ class SECFileSourcer:
         # Track processed line items to avoid duplicates
         processed_line_items = set()
         
-        # Helper to build section with consolidated line items
+        # Helper to build section with hierarchical structure
         def build_section(section_title, order, df):
             rows = []
             
@@ -1296,7 +1268,15 @@ class SECFileSourcer:
             
             rows.append(section_row)
             
-            # Process each line item in order
+            # Create a mapping of parent concepts to their children
+            parent_children_map = {}
+            for item, parent in order:
+                if parent is not None:
+                    if parent not in parent_children_map:
+                        parent_children_map[parent] = []
+                    parent_children_map[parent].append(item)
+            
+            # Process each line item in hierarchical order
             for item, parent in order:
                 if item in df.columns:
                     # Convert technical concept name to user-friendly title
@@ -1313,6 +1293,7 @@ class SECFileSourcer:
                         # Skip duplicates
                         continue
                     
+                    # Determine if this is an aggregate/total line item
                     is_aggregate = (parent is None and 
                                   (item.lower().startswith('total') or 
                                    'Net' in item or 'Gross' in item or 
@@ -1320,34 +1301,102 @@ class SECFileSourcer:
                                    'OperatingIncome' in item or 
                                    'CashAtEndOfPeriod' == item))
                     
-                    # Create a single row for this line item
-                    row = {
-                        'Line Item': friendly_title,
-                        'statement_type': section_title.split()[0].upper(),
-                        'is_section_heading': False,
-                        'parent': parent,
-                        'is_aggregate': is_aggregate
-                    }
+                    # If this item has children, create a parent row first
+                    if item in parent_children_map:
+                        # Create parent row
+                        parent_friendly_title = self._get_user_friendly_title(item)
+                        parent_row = {
+                            'Line Item': parent_friendly_title,
+                            'statement_type': section_title.split()[0].upper(),
+                            'is_section_heading': False,
+                            'parent': parent,
+                            'is_aggregate': True  # Parent rows are aggregators
+                        }
+                        
+                        # Add values for each period as columns
+                        for date in df.index:
+                            parent_row[date] = df.loc[date, item]
+                        
+                        rows.append(parent_row)
+                        processed_line_items.add(parent_friendly_title)
+                        
+                        # Now add all children under this parent
+                        for child_item in parent_children_map[item]:
+                            if child_item in df.columns:
+                                child_friendly_title = self._get_user_friendly_title(child_item)
+                                
+                                # Skip if already processed
+                                if child_friendly_title in processed_line_items:
+                                    continue
+                                
+                                # Create child row
+                                child_row = {
+                                    'Line Item': child_friendly_title,
+                                    'statement_type': section_title.split()[0].upper(),
+                                    'is_section_heading': False,
+                                    'parent': item,  # Reference to parent
+                                    'is_aggregate': False  # Children are not aggregators
+                                }
+                                
+                                # Add values for each period as columns
+                                for date in df.index:
+                                    child_row[date] = df.loc[date, child_item]
+                                
+                                rows.append(child_row)
+                                processed_line_items.add(child_friendly_title)
                     
-                    # Add values for each period as columns
-                    for date in df.index:
-                        row[date] = df.loc[date, item]
-                    
-                    rows.append(row)
-                    processed_line_items.add(friendly_title)
+                    # If this item doesn't have children and hasn't been processed as a child
+                    elif friendly_title not in processed_line_items:
+                        # Create a single row for this line item
+                        row = {
+                            'Line Item': friendly_title,
+                            'statement_type': section_title.split()[0].upper(),
+                            'is_section_heading': False,
+                            'parent': parent,
+                            'is_aggregate': is_aggregate
+                        }
+                        
+                        # Add values for each period as columns
+                        for date in df.index:
+                            row[date] = df.loc[date, item]
+                        
+                        rows.append(row)
+                        processed_line_items.add(friendly_title)
             
             return rows
         
         # Build all sections
         rows = []
         rows += build_section('INCOME STATEMENT', income_order, income_df)
+        
+        # Add blank row between sections
+        if rows:  # Only add blank row if we have data
+            blank_row = {'Line Item': '', 'statement_type': '', 'is_section_heading': False, 'parent': None, 'is_aggregate': False}
+            # Add empty values for all available dates
+            if not income_df.empty:
+                for date in income_df.index:
+                    blank_row[date] = ''
+            rows.append(blank_row)
+        
         rows += build_section('BALANCE SHEET', balance_order, balance_df)
+        
+        # Add blank row between sections
+        if rows:  # Only add blank row if we have data
+            blank_row = {'Line Item': '', 'statement_type': '', 'is_section_heading': False, 'parent': None, 'is_aggregate': False}
+            # Add empty values for all available dates
+            if not balance_df.empty:
+                for date in balance_df.index:
+                    blank_row[date] = ''
+            rows.append(blank_row)
+        
         rows += build_section('CASH FLOW STATEMENT', cash_flow_order, cash_flow_df)
         
         # Convert to DataFrame
         if rows:
             df = pd.DataFrame(rows)
             df = df.fillna('')
+            # Remove empty columns before returning
+            df = self._remove_empty_columns(df)
             return df
         else:
             return pd.DataFrame()
@@ -1927,6 +1976,9 @@ class SECFileSourcer:
                     self.progress_callback(f"      - {reason}: {count} occurrences")
         
         if all_data_points:
+            # Merge line items with same name but different dates
+            all_data_points = self._merge_line_items_by_date(all_data_points, self.progress_callback if hasattr(self, 'progress_callback') else None)
+            
             # Sort by date (most recent first)
             all_data_points.sort(key=lambda x: x['date'], reverse=True)
             
@@ -3467,6 +3519,480 @@ class SECFileSourcer:
             'Cash at Beginning of Period': None,
             'Cash at End of Period': None
         }
+
+    def _remove_empty_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove columns that are completely empty or contain only empty strings.
+        
+        Args:
+            df: DataFrame to clean
+            
+        Returns:
+            DataFrame with empty columns removed
+        """
+        if df.empty:
+            return df
+        
+        # Remove columns that are completely empty
+        non_empty_cols = []
+        for col in df.columns:
+            # Check if column has any non-empty values
+            if df[col].notna().any() and (df[col] != '').any():
+                non_empty_cols.append(col)
+        
+        return df[non_empty_cols]
+
+    def _remove_formatting_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove formatting columns that are only used for Excel formatting.
+        
+        Args:
+            df: DataFrame to clean
+            
+        Returns:
+            DataFrame with formatting columns removed
+        """
+        if df.empty:
+            return df
+        
+        # Columns to remove (formatting indicators)
+        formatting_columns = ['is_section_heading', 'parent', 'is_aggregate', 'statement_type']
+        
+        # Remove formatting columns if they exist
+        columns_to_keep = [col for col in df.columns if col not in formatting_columns]
+        
+        return df[columns_to_keep]
+
+    def _merge_line_items_by_date(self, all_data_points: List[Dict], progress_callback=None) -> List[Dict]:
+        """
+        Merge data points from different XBRL tags that represent the same line item but have data for different dates.
+        
+        Args:
+            all_data_points: List of data points with date, concept, and value
+            progress_callback: Optional progress callback function
+            
+        Returns:
+            List[Dict]: Merged data points with consolidated line items
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        progress("    • Merging line items with same name but different dates...")
+        
+        # Group data points by user-friendly title
+        title_groups = {}
+        for point in all_data_points:
+            concept = point['concept']
+            # Get user-friendly title for the concept
+            friendly_title = self._get_user_friendly_title(concept)
+            
+            if friendly_title not in title_groups:
+                title_groups[friendly_title] = []
+            title_groups[friendly_title].append(point)
+        
+        # Merge groups that have the same title but different dates
+        merged_points = []
+        merge_stats = {
+            'total_groups': len(title_groups),
+            'merged_groups': 0,
+            'total_merged_points': 0,
+            'conflicts_resolved': 0
+        }
+        
+        for friendly_title, points in title_groups.items():
+            if len(points) == 1:
+                # Single point, no merging needed
+                merged_points.append(points[0])
+                continue
+            
+            # Check if these points have different dates (indicating they should be merged)
+            dates = [point['date'] for point in points]
+            unique_dates = set(dates)
+            
+            if len(unique_dates) == len(points):
+                # All points have different dates - this is what we want to merge
+                merge_stats['merged_groups'] += 1
+                merge_stats['total_merged_points'] += len(points)
+                
+                # Create a single merged point for each unique date
+                date_value_map = {}
+                for point in points:
+                    date = point['date']
+                    value = point['value']
+                    # If multiple values for same date, take the first one (could be enhanced with validation)
+                    if date not in date_value_map:
+                        date_value_map[date] = value
+                
+                # Create merged points for each date
+                for date, value in date_value_map.items():
+                    merged_point = {
+                        'date': date,
+                        'concept': friendly_title,  # Use the friendly title as the concept
+                        'value': value,
+                        'merged_from': [p['concept'] for p in points]  # Track original concepts
+                    }
+                    merged_points.append(merged_point)
+                
+                progress(f"      ✓ Merged {len(points)} concepts into '{friendly_title}' ({len(date_value_map)} dates)")
+            else:
+                # Points have overlapping dates - resolve conflicts intelligently
+                merge_stats['conflicts_resolved'] += 1
+                resolved_points = self._resolve_date_conflicts(points, friendly_title, progress)
+                merged_points.extend(resolved_points)
+        
+        progress(f"    • Merge complete: {merge_stats['merged_groups']}/{merge_stats['total_groups']} groups merged")
+        progress(f"    • Conflicts resolved: {merge_stats['conflicts_resolved']}")
+        progress(f"    • Total data points after merging: {len(merged_points)}")
+        
+        return merged_points
+
+    def _resolve_date_conflicts(self, points: List[Dict], friendly_title: str, progress_callback=None) -> List[Dict]:
+        """
+        Resolve conflicts when multiple data points exist for the same date.
+        Uses intelligent rules to choose the best value.
+        
+        Args:
+            points: List of data points with potential date conflicts
+            friendly_title: User-friendly title for the line item
+            progress_callback: Optional progress callback function
+            
+        Returns:
+            List[Dict]: Resolved data points
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        # Group by date
+        date_groups = {}
+        for point in points:
+            date = point['date']
+            if date not in date_groups:
+                date_groups[date] = []
+            date_groups[date].append(point)
+        
+        resolved_points = []
+        
+        for date, date_points in date_groups.items():
+            if len(date_points) == 1:
+                # No conflict for this date
+                resolved_points.append(date_points[0])
+                continue
+            
+            # Multiple points for same date - resolve conflict
+            progress(f"        ⚠ Resolving conflict for '{friendly_title}' on {date} ({len(date_points)} values)")
+            
+            # Strategy 1: Prefer US-GAAP over non-US-GAAP
+            us_gaap_points = [p for p in date_points if str(p['concept']).startswith('us-gaap:')]
+            if len(us_gaap_points) == 1:
+                resolved_points.append(us_gaap_points[0])
+                progress(f"          ✓ Selected US-GAAP value: {us_gaap_points[0]['concept']}")
+                continue
+            elif len(us_gaap_points) > 1:
+                # Multiple US-GAAP values - use the most specific one
+                best_point = self._select_most_specific_concept(us_gaap_points)
+                resolved_points.append(best_point)
+                progress(f"          ✓ Selected most specific US-GAAP: {best_point['concept']}")
+                continue
+            
+            # Strategy 2: If no US-GAAP, select the most specific concept
+            best_point = self._select_most_specific_concept(date_points)
+            resolved_points.append(best_point)
+            progress(f"          ✓ Selected most specific concept: {best_point['concept']}")
+        
+        return resolved_points
+
+    def _select_most_specific_concept(self, points: List[Dict]) -> Dict:
+        """
+        Select the most specific concept from a list of data points.
+        More specific concepts are preferred over general ones.
+        
+        Args:
+            points: List of data points to choose from
+            
+        Returns:
+            Dict: The selected data point
+        """
+        # Define concept specificity hierarchy
+        specificity_scores = {
+            # Most specific (highest priority)
+            'RevenueFromContractWithCustomerExcludingAssessedTax': 100,
+            'SalesRevenueNet': 95,
+            'Revenues': 90,
+            'RevenueFromContractWithCustomer': 85,
+            
+            # Cost of revenue
+            'CostOfRevenue': 90,
+            'CostOfGoodsAndServicesSold': 85,
+            'CostOfGoodsSold': 80,
+            
+            # Operating expenses
+            'ResearchAndDevelopmentExpense': 90,
+            'SellingGeneralAndAdministrativeExpense': 90,
+            'OperatingExpenses': 80,
+            
+            # Net income
+            'NetIncomeLoss': 90,
+            'NetIncomeLossAvailableToCommonStockholdersBasic': 95,
+            
+            # Balance sheet items
+            'CashAndCashEquivalentsAtCarryingValue': 90,
+            'CashAndCashEquivalents': 85,
+            'Cash': 80,
+            
+            'AccountsReceivableNet': 90,
+            'AccountsReceivable': 85,
+            
+            'InventoryNet': 90,
+            'Inventory': 85,
+            
+            # Default score for unknown concepts
+            'default': 50
+        }
+        
+        best_point = points[0]  # Default to first point
+        best_score = specificity_scores.get('default', 50)
+        
+        for point in points:
+            concept = point['concept']
+            # Extract the concept name without namespace
+            concept_name = concept.split(':')[-1] if ':' in concept else concept
+            
+            # Get specificity score
+            score = specificity_scores.get(concept_name, specificity_scores['default'])
+            
+            # Boost score for US-GAAP concepts
+            if concept.startswith('us-gaap:'):
+                score += 10
+            
+            if score > best_score:
+                best_score = score
+                best_point = point
+        
+        return best_point
+
+    def apply_text_formatting_to_titles(self, df: pd.DataFrame, formatting_style: str = 'markers') -> pd.DataFrame:
+        """
+        Apply text formatting directly to line item titles using formatting markers.
+        
+        Args:
+            df: DataFrame with formatting columns (is_section_heading, parent, is_aggregate)
+            formatting_style: Style of formatting to apply ('markers', 'html', 'rich_text')
+            
+        Returns:
+            DataFrame with formatted line item titles
+        """
+        if df.empty:
+            return df
+        
+        # Create a copy to avoid modifying the original
+        formatted_df = df.copy()
+        
+        if 'Line Item' not in formatted_df.columns:
+            return formatted_df
+        
+        # Apply formatting based on the style
+        if formatting_style == 'markers':
+            formatted_df['Line Item'] = formatted_df.apply(self._apply_marker_formatting, axis=1)
+        elif formatting_style == 'html':
+            formatted_df['Line Item'] = formatted_df.apply(self._apply_html_formatting, axis=1)
+        elif formatting_style == 'rich_text':
+            formatted_df['Line Item'] = formatted_df.apply(self._apply_rich_text_formatting, axis=1)
+        elif formatting_style == 'unicode':
+            formatted_df['Line Item'] = formatted_df.apply(self._apply_unicode_formatting, axis=1)
+        
+        return formatted_df
+    
+    def _apply_marker_formatting(self, row) -> str:
+        """Apply formatting using simple text markers."""
+        line_item = str(row.get('Line Item', ''))
+        
+        # Check formatting flags
+        is_section_heading = row.get('is_section_heading', False)
+        is_aggregate = row.get('is_aggregate', False)
+        has_parent = row.get('parent') is not None and str(row.get('parent', '')).strip() != ''
+        
+        # Apply formatting markers
+        if is_section_heading:
+            return f"**{line_item}**"  # Bold marker
+        elif is_aggregate:
+            if has_parent:
+                return f"  *{line_item}*"  # Italic with indentation
+            else:
+                return f"*{line_item}*"  # Italic
+        elif has_parent:
+            return f"  {line_item}"  # Indentation only
+        else:
+            return line_item  # No formatting
+    
+    def _apply_html_formatting(self, row) -> str:
+        """Apply formatting using HTML tags."""
+        line_item = str(row.get('Line Item', ''))
+        
+        # Check formatting flags
+        is_section_heading = row.get('is_section_heading', False)
+        is_aggregate = row.get('is_aggregate', False)
+        has_parent = row.get('parent') is not None and str(row.get('parent', '')).strip() != ''
+        
+        # Apply HTML formatting
+        if is_section_heading:
+            return f"<b>{line_item}</b>"  # Bold
+        elif is_aggregate:
+            if has_parent:
+                return f"&nbsp;&nbsp;<i>{line_item}</i>"  # Italic with indentation
+            else:
+                return f"<i>{line_item}</i>"  # Italic
+        elif has_parent:
+            return f"&nbsp;&nbsp;{line_item}"  # Indentation only
+        else:
+            return line_item  # No formatting
+    
+    def _apply_rich_text_formatting(self, row) -> str:
+        """Apply formatting using rich text markers."""
+        line_item = str(row.get('Line Item', ''))
+        
+        # Check formatting flags
+        is_section_heading = row.get('is_section_heading', False)
+        is_aggregate = row.get('is_aggregate', False)
+        has_parent = row.get('parent') is not None and str(row.get('parent', '')).strip() != ''
+        
+        # Apply rich text formatting
+        if is_section_heading:
+            return f"[BOLD]{line_item}[/BOLD]"  # Bold
+        elif is_aggregate:
+            if has_parent:
+                return f"  [ITALIC]{line_item}[/ITALIC]"  # Italic with indentation
+            else:
+                return f"[ITALIC]{line_item}[/ITALIC]"  # Italic
+        elif has_parent:
+            return f"  {line_item}"  # Indentation only
+        else:
+            return line_item  # No formatting
+    
+    def _apply_unicode_formatting(self, row) -> str:
+        """Apply formatting using Unicode characters for visual distinction."""
+        line_item = str(row.get('Line Item', ''))
+        
+        # Check formatting flags
+        is_section_heading = row.get('is_section_heading', False)
+        is_aggregate = row.get('is_aggregate', False)
+        has_parent = row.get('parent') is not None and str(row.get('parent', '')).strip() != ''
+        
+        # Apply Unicode formatting
+        if is_section_heading:
+            return f"🔹 {line_item.upper()}"  # Bold section heading with bullet
+        elif is_aggregate:
+            if has_parent:
+                return f"  📊 {line_item}"  # Aggregate with indentation and chart icon
+            else:
+                return f"📊 {line_item}"  # Aggregate with chart icon
+        elif has_parent:
+            return f"  ➤ {line_item}"  # Child item with arrow and indentation
+        else:
+            return f"• {line_item}"  # Regular item with bullet
+    
+    def export_to_excel_with_formatted_titles(self, financial_model: Dict[str, pd.DataFrame], 
+                                            sensitivity_model: Dict[str, pd.DataFrame], 
+                                            ticker: str, filename: str = None, 
+                                            formatting_style: str = 'markers',
+                                            schmoove_mode: bool = False, 
+                                            progress_callback=None) -> str:
+        """
+        Export financial models to Excel with formatted line item titles.
+        This is an alternative to the cell-level formatting approach.
+        
+        Args:
+            financial_model: Dictionary of financial DataFrames
+            sensitivity_model: Dictionary of sensitivity analysis DataFrames
+            ticker: Stock ticker symbol
+            filename: Output filename
+            formatting_style: Style of text formatting ('markers', 'html', 'rich_text', 'unicode')
+            schmoove_mode: Enable parallel processing
+            progress_callback: Progress callback function
+            
+        Returns:
+            Path to the created Excel file
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        import pandas as pd
+        import os
+        from datetime import datetime
+        
+        progress("    • Initializing Excel export with formatted titles...")
+        
+        # Ensure the Storage directory exists
+        storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
+        os.makedirs(storage_dir, exist_ok=True)
+        
+        if filename is None:
+            filename = f"{ticker}_financial_model_formatted_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filepath = os.path.join(storage_dir, filename)
+        
+        progress(f"    • Creating Excel file with {formatting_style} formatting: {filename}")
+        
+        # Write all DataFrames to Excel using pandas
+        progress("    • Writing financial data with formatted titles...")
+        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
+            # Annual sheet
+            annual_income = financial_model.get('annual_income_statement', pd.DataFrame())
+            annual_balance = financial_model.get('annual_balance_sheet', pd.DataFrame())
+            annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
+            if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
+                progress("    • Writing annual financial statements with formatted titles...")
+                stacked_annual = self._create_vertically_stacked_statement(annual_income, annual_balance, annual_cash_flow, period_type="Annual")
+                # Apply text formatting to titles
+                stacked_annual = self.apply_text_formatting_to_titles(stacked_annual, formatting_style)
+                # Remove empty columns before writing to Excel
+                stacked_annual = self._remove_empty_columns(stacked_annual)
+                stacked_annual.to_excel(writer, sheet_name='Annual Financial Statements', index=False)
+            
+            # Quarterly sheet
+            quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
+            quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
+            quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
+            if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
+                progress("    • Writing quarterly financial statements with formatted titles...")
+                stacked_quarterly = self._create_vertically_stacked_statement(quarterly_income, quarterly_balance, quarterly_cash_flow, period_type="Quarterly")
+                # Apply text formatting to titles
+                stacked_quarterly = self.apply_text_formatting_to_titles(stacked_quarterly, formatting_style)
+                # Remove empty columns before writing to Excel
+                stacked_quarterly = self._remove_empty_columns(stacked_quarterly)
+                stacked_quarterly.to_excel(writer, sheet_name='Quarterly Financial Statements', index=False)
+            
+            # Sensitivity and summary sheets
+            progress("    • Writing sensitivity analysis and summary sheets...")
+            for sheet_name, df in sensitivity_model.items():
+                if not df.empty:
+                    # Remove empty columns before writing to Excel
+                    cleaned_df = self._remove_empty_columns(df)
+                    cleaned_df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
+            
+            # Summary sheet
+            summary_data = {
+                'Metric': ['Ticker', 'Model Created', 'Data Points', 'Scenarios Analyzed', 'Formatting Style'],
+                'Value': [
+                    ticker,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    sum(len(df) for df in financial_model.values() if not df.empty),
+                    len(sensitivity_model.get('case_summary', pd.DataFrame())),
+                    formatting_style
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        
+        progress(f"    ✓ Excel file with formatted titles saved: {filepath}")
+        return filepath
 
 # Example usage and testing
 if __name__ == "__main__":

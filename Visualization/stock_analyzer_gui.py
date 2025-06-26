@@ -639,9 +639,15 @@ class RedTintOverlay(QWidget):
         self.setVisible(False)
         
         # Set up the overlay to cover the entire parent window
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # Don't block mouse events
         self.setAttribute(Qt.WA_NoSystemBackground)  # Transparent background
         self.setAttribute(Qt.WA_TranslucentBackground)  # Allow transparency
+        
+        # Enable mouse tracking for exclusion zone
+        self.setMouseTracking(True)
+        
+        # Track mouse position for exclusion zone
+        self.mouse_pos = QPoint(0, 0)
+        self.exclusion_radius = 100  # 100 pixel radius exclusion zone
         
         try:
             import psutil
@@ -657,19 +663,63 @@ class RedTintOverlay(QWidget):
             self.cpu_percent = 0
         self.update()
     
+    def mouseMoveEvent(self, event):
+        """Track mouse position for exclusion zone."""
+        self.mouse_pos = event.pos()
+        self.update()  # Redraw to update exclusion zone
+        # Pass the event to parent widgets
+        event.ignore()
+    
+    def mousePressEvent(self, event):
+        """Pass mouse press events through to underlying widgets."""
+        event.ignore()
+    
+    def mouseReleaseEvent(self, event):
+        """Pass mouse release events through to underlying widgets."""
+        event.ignore()
+    
+    def mouseDoubleClickEvent(self, event):
+        """Pass mouse double-click events through to underlying widgets."""
+        event.ignore()
+    
+    def wheelEvent(self, event):
+        """Pass wheel events through to underlying widgets."""
+        event.ignore()
+    
     def paintEvent(self, event):
-        """Paint the red tint overlay."""
+        """Paint the red tint overlay with exponential scaling and mouse exclusion zone."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Calculate opacity based on CPU usage (0-100% CPU = 0-0.6 opacity)
-        opacity = min(0.6, self.cpu_percent / 100.0 * 0.6)
+        # Calculate opacity with exponential scaling
+        if self.cpu_percent >= 95:
+            # 100% opacity when CPU is 95% or above
+            base_opacity = 1.0
+        else:
+            # Exponential scaling: (cpu_percent/100)^2 for more dramatic effect
+            # This creates a curve that starts slow and accelerates
+            normalized_cpu = self.cpu_percent / 100.0
+            base_opacity = normalized_cpu ** 2  # Exponential scaling
+            # Scale to max 0.8 opacity for CPU < 95%
+            base_opacity = min(0.8, base_opacity)
         
         # Create red tint color with calculated opacity
-        red_tint = QColor(255, 0, 0, int(255 * opacity))
+        red_tint = QColor(255, 0, 0, int(255 * base_opacity))
         
         # Fill the entire widget with the red tint
         painter.fillRect(self.rect(), red_tint)
+        
+        # Create exclusion zone around mouse cursor
+        if base_opacity > 0:
+            # Create a circular path for the exclusion zone
+            exclusion_path = QPainterPath()
+            exclusion_path.addEllipse(self.mouse_pos, self.exclusion_radius, self.exclusion_radius)
+            
+            # Set composition mode to clear the exclusion zone
+            painter.setCompositionMode(QPainter.CompositionMode_Clear)
+            
+            # Clear the circular area around the mouse
+            painter.fillPath(exclusion_path, Qt.transparent)
         
         painter.end()
     
