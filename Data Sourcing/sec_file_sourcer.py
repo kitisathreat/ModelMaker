@@ -867,139 +867,7 @@ class SECFileSourcer:
             n_jobs = 1
         
         # Parent-child mapping for indentation following standard three-statement modeling
-        parent_map = {
-            # Income Statement - Standard format
-            'Revenue': None,  # Top level
-            'CostOfGoodsSold': 'Revenue',
-            'GrossProfit': None,  # Calculated total
-            
-            # Operating expenses
-            'ResearchAndDevelopmentExpense': 'OperatingExpenses',
-            'SellingGeneralAndAdministrativeExpense': 'OperatingExpenses',
-            'DepreciationAndAmortization': 'OperatingExpenses',
-            'StockBasedCompensationExpense': 'OperatingExpenses',
-            'RestructuringCharges': 'OperatingExpenses',
-            'ImpairmentCharges': 'OperatingExpenses',
-            'OtherOperatingExpenses': 'OperatingExpenses',
-            'OperatingExpenses': None,  # Subtotal
-            
-            'OperatingIncome': None,  # Total
-            
-            # Non-operating items
-            'InterestIncome': 'NonOperatingIncome',
-            'InterestExpense': 'NonOperatingIncome',
-            'GainLossOnSaleOfAssets': 'NonOperatingIncome',
-            'ForeignCurrencyGainLoss': 'NonOperatingIncome',
-            'OtherIncomeExpense': 'NonOperatingIncome',
-            'NonOperatingIncome': None,  # Subtotal
-            
-            'IncomeBeforeTaxes': None,  # Total
-            'IncomeTaxExpense': 'IncomeBeforeTaxes',
-            'NetIncome': None,  # Final total
-            
-            # Earnings per share
-            'EarningsPerShareBasic': 'NetIncome',
-            'EarningsPerShareDiluted': 'NetIncome',
-            'WeightedAverageSharesBasic': 'NetIncome',
-            'WeightedAverageSharesDiluted': 'NetIncome',
-            
-            # Balance Sheet - Standard format: Assets = Liabilities + Equity
-            # Current Assets
-            'CashAndCashEquivalents': 'CurrentAssets',
-            'ShortTermInvestments': 'CurrentAssets',
-            'AccountsReceivable': 'CurrentAssets',
-            'Inventory': 'CurrentAssets',
-            'PrepaidExpenses': 'CurrentAssets',
-            'OtherCurrentAssets': 'CurrentAssets',
-            'CurrentAssets': None,  # Subtotal
-            
-            # Non-Current Assets
-            'PropertyPlantAndEquipmentNet': 'NonCurrentAssets',
-            'Goodwill': 'NonCurrentAssets',
-            'IntangibleAssetsNet': 'NonCurrentAssets',
-            'LongTermInvestments': 'NonCurrentAssets',
-            'DeferredTaxAssets': 'NonCurrentAssets',
-            'OtherLongTermAssets': 'NonCurrentAssets',
-            'NonCurrentAssets': None,  # Subtotal
-            
-            'TotalAssets': None,  # Total Assets
-            
-            # Current Liabilities
-            'AccountsPayable': 'CurrentLiabilities',
-            'AccruedExpenses': 'CurrentLiabilities',
-            'DeferredRevenue': 'CurrentLiabilities',
-            'ShortTermDebt': 'CurrentLiabilities',
-            'OtherCurrentLiabilities': 'CurrentLiabilities',
-            'CurrentLiabilities': None,  # Subtotal
-            
-            # Non-Current Liabilities
-            'LongTermDebt': 'NonCurrentLiabilities',
-            'DeferredTaxLiabilities': 'NonCurrentLiabilities',
-            'OtherLongTermLiabilities': 'NonCurrentLiabilities',
-            'NonCurrentLiabilities': None,  # Subtotal
-            
-            'TotalLiabilities': None,  # Total Liabilities
-            
-            # Stockholders' Equity
-            'CommonStock': 'StockholdersEquity',
-            'AdditionalPaidInCapital': 'StockholdersEquity',
-            'RetainedEarnings': 'StockholdersEquity',
-            'AccumulatedOtherComprehensiveIncome': 'StockholdersEquity',
-            'TreasuryStock': 'StockholdersEquity',
-            'StockholdersEquity': None,  # Subtotal
-            
-            # Calculated metrics
-            'WorkingCapital': None,
-            'TotalDebt': None,
-            
-            # Cash Flow Statement - Standard format
-            # Operating Activities
-            'NetIncome': None,  # Starting point
-            'DepreciationAndAmortization': 'OperatingAdjustments',
-            'StockBasedCompensation': 'OperatingAdjustments',
-            'DeferredIncomeTaxes': 'OperatingAdjustments',
-            'OperatingAdjustments': None,  # Subtotal
-            
-            # Changes in Working Capital
-            'ChangeInAccountsReceivable': 'WorkingCapitalChanges',
-            'ChangeInInventory': 'WorkingCapitalChanges',
-            'ChangeInAccountsPayable': 'WorkingCapitalChanges',
-            'ChangeInDeferredRevenue': 'WorkingCapitalChanges',
-            'ChangeInOtherWorkingCapital': 'WorkingCapitalChanges',
-            'WorkingCapitalChanges': None,  # Subtotal
-            
-            'OtherOperatingActivities': 'OperatingActivities',
-            'OperatingActivities': None,  # Subtotal
-            'NetCashFromOperatingActivities': None,  # Total
-            
-            # Investing Activities
-            'CapitalExpenditures': 'InvestingActivities',
-            'Acquisitions': 'InvestingActivities',
-            'Investments': 'InvestingActivities',
-            'ProceedsFromInvestments': 'InvestingActivities',
-            'OtherInvestingActivities': 'InvestingActivities',
-            'InvestingActivities': None,  # Subtotal
-            'NetCashFromInvestingActivities': None,  # Total
-            
-            # Financing Activities
-            'ProceedsFromDebt': 'FinancingActivities',
-            'RepaymentsOfDebt': 'FinancingActivities',
-            'DividendsPaid': 'FinancingActivities',
-            'StockRepurchases': 'FinancingActivities',
-            'ProceedsFromStockIssuance': 'FinancingActivities',
-            'OtherFinancingActivities': 'FinancingActivities',
-            'FinancingActivities': None,  # Subtotal
-            'NetCashFromFinancingActivities': None,  # Total
-            
-            # Net Change and Ending Balance
-            'EffectOfExchangeRateChanges': None,
-            'NetChangeInCash': None,  # Final total
-            'CashAtBeginningOfPeriod': None,
-            'CashAtEndOfPeriod': None
-        }
-
-        # Open the workbook
-        wb = openpyxl.load_workbook(filepath)
+        parent_map = self._create_user_friendly_parent_map()
         
         # Format annual and quarterly sheets
         for sheet in ['Annual Financial Statements', 'Quarterly Financial Statements']:
@@ -1086,137 +954,8 @@ class SECFileSourcer:
             max_mem = None
         
         # Parent-child mapping for indentation following standard three-statement modeling
-        parent_map = {
-            # Income Statement - Standard format
-            'Revenue': None,  # Top level
-            'CostOfGoodsSold': 'Revenue',
-            'GrossProfit': None,  # Calculated total
-            
-            # Operating expenses
-            'ResearchAndDevelopmentExpense': 'OperatingExpenses',
-            'SellingGeneralAndAdministrativeExpense': 'OperatingExpenses',
-            'DepreciationAndAmortization': 'OperatingExpenses',
-            'StockBasedCompensationExpense': 'OperatingExpenses',
-            'RestructuringCharges': 'OperatingExpenses',
-            'ImpairmentCharges': 'OperatingExpenses',
-            'OtherOperatingExpenses': 'OperatingExpenses',
-            'OperatingExpenses': None,  # Subtotal
-            
-            'OperatingIncome': None,  # Total
-            
-            # Non-operating items
-            'InterestIncome': 'NonOperatingIncome',
-            'InterestExpense': 'NonOperatingIncome',
-            'GainLossOnSaleOfAssets': 'NonOperatingIncome',
-            'ForeignCurrencyGainLoss': 'NonOperatingIncome',
-            'OtherIncomeExpense': 'NonOperatingIncome',
-            'NonOperatingIncome': None,  # Subtotal
-            
-            'IncomeBeforeTaxes': None,  # Total
-            'IncomeTaxExpense': 'IncomeBeforeTaxes',
-            'NetIncome': None,  # Final total
-            
-            # Earnings per share
-            'EarningsPerShareBasic': 'NetIncome',
-            'EarningsPerShareDiluted': 'NetIncome',
-            'WeightedAverageSharesBasic': 'NetIncome',
-            'WeightedAverageSharesDiluted': 'NetIncome',
-            
-            # Balance Sheet - Standard format: Assets = Liabilities + Equity
-            # Current Assets
-            'CashAndCashEquivalents': 'CurrentAssets',
-            'ShortTermInvestments': 'CurrentAssets',
-            'AccountsReceivable': 'CurrentAssets',
-            'Inventory': 'CurrentAssets',
-            'PrepaidExpenses': 'CurrentAssets',
-            'OtherCurrentAssets': 'CurrentAssets',
-            'CurrentAssets': None,  # Subtotal
-            
-            # Non-Current Assets
-            'PropertyPlantAndEquipmentNet': 'NonCurrentAssets',
-            'Goodwill': 'NonCurrentAssets',
-            'IntangibleAssetsNet': 'NonCurrentAssets',
-            'LongTermInvestments': 'NonCurrentAssets',
-            'DeferredTaxAssets': 'NonCurrentAssets',
-            'OtherLongTermAssets': 'NonCurrentAssets',
-            'NonCurrentAssets': None,  # Subtotal
-            
-            'TotalAssets': None,  # Total Assets
-            
-            # Current Liabilities
-            'AccountsPayable': 'CurrentLiabilities',
-            'AccruedExpenses': 'CurrentLiabilities',
-            'DeferredRevenue': 'CurrentLiabilities',
-            'ShortTermDebt': 'CurrentLiabilities',
-            'OtherCurrentLiabilities': 'CurrentLiabilities',
-            'CurrentLiabilities': None,  # Subtotal
-            
-            # Non-Current Liabilities
-            'LongTermDebt': 'NonCurrentLiabilities',
-            'DeferredTaxLiabilities': 'NonCurrentLiabilities',
-            'OtherLongTermLiabilities': 'NonCurrentLiabilities',
-            'NonCurrentLiabilities': None,  # Subtotal
-            
-            'TotalLiabilities': None,  # Total Liabilities
-            
-            # Stockholders' Equity
-            'CommonStock': 'StockholdersEquity',
-            'AdditionalPaidInCapital': 'StockholdersEquity',
-            'RetainedEarnings': 'StockholdersEquity',
-            'AccumulatedOtherComprehensiveIncome': 'StockholdersEquity',
-            'TreasuryStock': 'StockholdersEquity',
-            'StockholdersEquity': None,  # Subtotal
-            
-            # Calculated metrics
-            'WorkingCapital': None,
-            'TotalDebt': None,
-            
-            # Cash Flow Statement - Standard format
-            # Operating Activities
-            'NetIncome': None,  # Starting point
-            'DepreciationAndAmortization': 'OperatingAdjustments',
-            'StockBasedCompensation': 'OperatingAdjustments',
-            'DeferredIncomeTaxes': 'OperatingAdjustments',
-            'OperatingAdjustments': None,  # Subtotal
-            
-            # Changes in Working Capital
-            'ChangeInAccountsReceivable': 'WorkingCapitalChanges',
-            'ChangeInInventory': 'WorkingCapitalChanges',
-            'ChangeInAccountsPayable': 'WorkingCapitalChanges',
-            'ChangeInDeferredRevenue': 'WorkingCapitalChanges',
-            'ChangeInOtherWorkingCapital': 'WorkingCapitalChanges',
-            'WorkingCapitalChanges': None,  # Subtotal
-            
-            'OtherOperatingActivities': 'OperatingActivities',
-            'OperatingActivities': None,  # Subtotal
-            'NetCashFromOperatingActivities': None,  # Total
-            
-            # Investing Activities
-            'CapitalExpenditures': 'InvestingActivities',
-            'Acquisitions': 'InvestingActivities',
-            'Investments': 'InvestingActivities',
-            'ProceedsFromInvestments': 'InvestingActivities',
-            'OtherInvestingActivities': 'InvestingActivities',
-            'InvestingActivities': None,  # Subtotal
-            'NetCashFromInvestingActivities': None,  # Total
-            
-            # Financing Activities
-            'ProceedsFromDebt': 'FinancingActivities',
-            'RepaymentsOfDebt': 'FinancingActivities',
-            'DividendsPaid': 'FinancingActivities',
-            'StockRepurchases': 'FinancingActivities',
-            'ProceedsFromStockIssuance': 'FinancingActivities',
-            'OtherFinancingActivities': 'FinancingActivities',
-            'FinancingActivities': None,  # Subtotal
-            'NetCashFromFinancingActivities': None,  # Total
-            
-            # Net Change and Ending Balance
-            'EffectOfExchangeRateChanges': None,
-            'NetChangeInCash': None,  # Final total
-            'CashAtBeginningOfPeriod': None,
-            'CashAtEndOfPeriod': None
-        }
-
+        parent_map = self._create_user_friendly_parent_map()
+        
         # Ensure the Storage directory exists
         storage_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Storage')
         os.makedirs(storage_dir, exist_ok=True)
@@ -1236,30 +975,16 @@ class SECFileSourcer:
             annual_cash_flow = financial_model.get('annual_cash_flow', pd.DataFrame())
             if not annual_income.empty or not annual_balance.empty or not annual_cash_flow.empty:
                 progress("    • Writing annual financial statements...")
-                startrow = 0
-                if not annual_income.empty:
-                    annual_income.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
-                    startrow += annual_income.shape[1] + 3
-                if not annual_balance.empty:
-                    annual_balance.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
-                    startrow += annual_balance.shape[1] + 3
-                if not annual_cash_flow.empty:
-                    annual_cash_flow.transpose().to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
+                stacked_annual = self._create_vertically_stacked_statement(annual_income, annual_balance, annual_cash_flow, period_type="Annual")
+                stacked_annual.to_excel(writer, sheet_name='Annual Financial Statements', index=False)
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
             quarterly_balance = financial_model.get('quarterly_balance_sheet', pd.DataFrame())
             quarterly_cash_flow = financial_model.get('quarterly_cash_flow', pd.DataFrame())
             if not quarterly_income.empty or not quarterly_balance.empty or not quarterly_cash_flow.empty:
                 progress("    • Writing quarterly financial statements...")
-                startrow = 0
-                if not quarterly_income.empty:
-                    quarterly_income.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
-                    startrow += quarterly_income.shape[1] + 3
-                if not quarterly_balance.empty:
-                    quarterly_balance.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
-                    startrow += quarterly_balance.shape[1] + 3
-                if not quarterly_cash_flow.empty:
-                    quarterly_cash_flow.transpose().to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
+                stacked_quarterly = self._create_vertically_stacked_statement(quarterly_income, quarterly_balance, quarterly_cash_flow, period_type="Quarterly")
+                stacked_quarterly.to_excel(writer, sheet_name='Quarterly Financial Statements', index=False)
             # Sensitivity and summary sheets
             progress("    • Writing sensitivity analysis and summary sheets...")
             for sheet_name, df in sensitivity_model.items():
@@ -1285,31 +1010,31 @@ class SECFileSourcer:
         for sheet in ['Annual Financial Statements', 'Quarterly Financial Statements']:
             if sheet in wb.sheetnames:
                 ws = wb[sheet]
-                # Bold headers
-                for row in ws.iter_rows(min_row=1, max_row=1):
-                    for cell in row:
+                # Find column indices for formatting metadata
+                col_map = {cell.value: idx+1 for idx, cell in enumerate(ws[1])}
+                line_item_col = col_map.get('Line Item', 1)
+                is_section_heading_col = col_map.get('is_section_heading')
+                is_aggregate_col = col_map.get('is_aggregate')
+                indent_level_col = col_map.get('indent_level')
+                # Format each row
+                for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+                    cell = row[line_item_col-1]
+                    is_section = row[is_section_heading_col-1].value if is_section_heading_col else False
+                    is_agg = row[is_aggregate_col-1].value if is_aggregate_col else False
+                    indent = row[indent_level_col-1].value if indent_level_col else 0
+                    # Bold section headings
+                    if is_section:
                         cell.font = Font(bold=True)
-                # Indent and bold parent categories (if present)
-                def format_row(row):
-                    line_item_cell = row[0]
-                    if line_item_cell.value in parent_map:
-                        parent = parent_map[line_item_cell.value]
-                        if parent is None:
-                            line_item_cell.font = Font(bold=True)
-                        else:
-                            indent_level = 1
-                            p = parent
-                            while p:
-                                indent_level += 1
-                                p = parent_map.get(p)
-                            line_item_cell.alignment = Alignment(indent=indent_level)
-                rows = list(ws.iter_rows(min_row=2))
-                if schmoove_mode and n_jobs > 1:
-                    progress("    • Applying formatting with parallel processing...")
-                    Parallel(n_jobs=n_jobs)(delayed(format_row)(row) for row in rows)
-                else:
-                    for row in rows:
-                        format_row(row)
+                    # Italicize aggregates/totals
+                    if is_agg and not is_section:
+                        cell.font = Font(italic=True)
+                    # Indent subcategories
+                    if indent and not is_section:
+                        cell.alignment = Alignment(indent=int(indent))
+                # Hide formatting metadata columns
+                for meta_col in [is_section_heading_col, is_aggregate_col, indent_level_col]:
+                    if meta_col:
+                        ws.column_dimensions[openpyxl.utils.get_column_letter(meta_col)].hidden = True
         # Save the formatted workbook
         progress("    • Saving formatted Excel file...")
         wb.save(filepath)
@@ -1319,185 +1044,150 @@ class SECFileSourcer:
     def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
         """
         Create a vertically stacked financial statement with proper formatting following standard three-statement modeling principles.
-        
-        Args:
-            income_df: Income statement DataFrame
-            balance_df: Balance sheet DataFrame
-            cash_flow_df: Cash flow statement DataFrame
-            period_type: "Annual" or "Quarterly"
-            
-        Returns:
-            pd.DataFrame: Combined vertically stacked statement
+        Adds section headings, indent levels, and aggregate markers for formatting.
+        Returns a DataFrame with extra columns for formatting.
         """
-        # Define the order of line items for each statement following standard accounting principles
+        import pandas as pd
         
-        # INCOME STATEMENT - Standard format from top to bottom
+        # Define the order and structure for each statement
         income_order = [
-            # Revenue section
-            'Revenue',
-            'CostOfGoodsSold',
-            'GrossProfit',
-            
-            # Operating expenses
-            'ResearchAndDevelopmentExpense',
-            'SellingGeneralAndAdministrativeExpense',
-            'DepreciationAndAmortization',
-            'StockBasedCompensationExpense',
-            'RestructuringCharges',
-            'ImpairmentCharges',
-            'OtherOperatingExpenses',
-            
-            # Operating income
-            'OperatingIncome',
-            
-            # Non-operating income/expense
-            'InterestIncome',
-            'InterestExpense',
-            'GainLossOnSaleOfAssets',
-            'ForeignCurrencyGainLoss',
-            'OtherIncomeExpense',
-            
-            # Income before taxes
-            'IncomeBeforeTaxes',
-            
-            # Income taxes
-            'IncomeTaxExpense',
-            
-            # Net income
-            'NetIncome',
-            
-            # Earnings per share
-            'EarningsPerShareBasic',
-            'EarningsPerShareDiluted',
-            'WeightedAverageSharesBasic',
-            'WeightedAverageSharesDiluted'
+            ('Revenue', None),
+            ('CostOfGoodsSold', 'Revenue'),
+            ('GrossProfit', None),
+            ('ResearchAndDevelopmentExpense', 'OperatingExpenses'),
+            ('SellingGeneralAndAdministrativeExpense', 'OperatingExpenses'),
+            ('DepreciationAndAmortization', 'OperatingExpenses'),
+            ('StockBasedCompensationExpense', 'OperatingExpenses'),
+            ('RestructuringCharges', 'OperatingExpenses'),
+            ('ImpairmentCharges', 'OperatingExpenses'),
+            ('OtherOperatingExpenses', 'OperatingExpenses'),
+            ('OperatingExpenses', None),  # subtotal
+            ('OperatingIncome', None),  # total
+            ('InterestIncome', 'NonOperatingIncome'),
+            ('InterestExpense', 'NonOperatingIncome'),
+            ('GainLossOnSaleOfAssets', 'NonOperatingIncome'),
+            ('ForeignCurrencyGainLoss', 'NonOperatingIncome'),
+            ('OtherIncomeExpense', 'NonOperatingIncome'),
+            ('NonOperatingIncome', None),  # subtotal
+            ('IncomeBeforeTaxes', None),
+            ('IncomeTaxExpense', 'IncomeBeforeTaxes'),
+            ('NetIncome', None),
+            ('EarningsPerShareBasic', 'NetIncome'),
+            ('EarningsPerShareDiluted', 'NetIncome'),
+            ('WeightedAverageSharesBasic', 'NetIncome'),
+            ('WeightedAverageSharesDiluted', 'NetIncome'),
         ]
-        
-        # BALANCE SHEET - Standard format: Assets = Liabilities + Equity
         balance_order = [
-            # Current Assets
-            'CashAndCashEquivalents',
-            'ShortTermInvestments',
-            'AccountsReceivable',
-            'Inventory',
-            'PrepaidExpenses',
-            'OtherCurrentAssets',
-            'TotalCurrentAssets',
-            
-            # Non-Current Assets
-            'PropertyPlantAndEquipmentNet',
-            'Goodwill',
-            'IntangibleAssetsNet',
-            'LongTermInvestments',
-            'DeferredTaxAssets',
-            'OtherLongTermAssets',
-            'TotalNonCurrentAssets',
-            'TotalAssets',
-            
-            # Current Liabilities
-            'AccountsPayable',
-            'AccruedExpenses',
-            'DeferredRevenue',
-            'ShortTermDebt',
-            'OtherCurrentLiabilities',
-            'TotalCurrentLiabilities',
-            
-            # Non-Current Liabilities
-            'LongTermDebt',
-            'DeferredTaxLiabilities',
-            'OtherLongTermLiabilities',
-            'TotalNonCurrentLiabilities',
-            'TotalLiabilities',
-            
-            # Stockholders' Equity
-            'CommonStock',
-            'AdditionalPaidInCapital',
-            'RetainedEarnings',
-            'AccumulatedOtherComprehensiveIncome',
-            'TreasuryStock',
-            'TotalStockholdersEquity',
-            
-            # Calculated metrics
-            'WorkingCapital',
-            'TotalDebt'
+            ('CashAndCashEquivalents', 'CurrentAssets'),
+            ('ShortTermInvestments', 'CurrentAssets'),
+            ('AccountsReceivable', 'CurrentAssets'),
+            ('Inventory', 'CurrentAssets'),
+            ('PrepaidExpenses', 'CurrentAssets'),
+            ('OtherCurrentAssets', 'CurrentAssets'),
+            ('TotalCurrentAssets', None),
+            ('PropertyPlantAndEquipmentNet', 'NonCurrentAssets'),
+            ('Goodwill', 'NonCurrentAssets'),
+            ('IntangibleAssetsNet', 'NonCurrentAssets'),
+            ('LongTermInvestments', 'NonCurrentAssets'),
+            ('DeferredTaxAssets', 'NonCurrentAssets'),
+            ('OtherLongTermAssets', 'NonCurrentAssets'),
+            ('TotalNonCurrentAssets', None),
+            ('TotalAssets', None),
+            ('AccountsPayable', 'CurrentLiabilities'),
+            ('AccruedExpenses', 'CurrentLiabilities'),
+            ('DeferredRevenue', 'CurrentLiabilities'),
+            ('ShortTermDebt', 'CurrentLiabilities'),
+            ('OtherCurrentLiabilities', 'CurrentLiabilities'),
+            ('TotalCurrentLiabilities', None),
+            ('LongTermDebt', 'NonCurrentLiabilities'),
+            ('DeferredTaxLiabilities', 'NonCurrentLiabilities'),
+            ('OtherLongTermLiabilities', 'NonCurrentLiabilities'),
+            ('TotalNonCurrentLiabilities', None),
+            ('TotalLiabilities', None),
+            ('CommonStock', 'StockholdersEquity'),
+            ('AdditionalPaidInCapital', 'StockholdersEquity'),
+            ('RetainedEarnings', 'StockholdersEquity'),
+            ('AccumulatedOtherComprehensiveIncome', 'StockholdersEquity'),
+            ('TreasuryStock', 'StockholdersEquity'),
+            ('TotalStockholdersEquity', None),
+            ('WorkingCapital', None),
+            ('TotalDebt', None),
         ]
-        
-        # CASH FLOW STATEMENT - Standard format: Operating, Investing, Financing
         cash_flow_order = [
-            # Operating Activities
-            'NetIncome',
-            'DepreciationAndAmortization',
-            'StockBasedCompensation',
-            'DeferredIncomeTaxes',
-            
-            # Changes in Working Capital
-            'ChangeInAccountsReceivable',
-            'ChangeInInventory',
-            'ChangeInAccountsPayable',
-            'ChangeInDeferredRevenue',
-            'ChangeInOtherWorkingCapital',
-            
-            'OtherOperatingActivities',
-            'NetCashFromOperatingActivities',
-            
-            # Investing Activities
-            'CapitalExpenditures',
-            'Acquisitions',
-            'Investments',
-            'ProceedsFromInvestments',
-            'OtherInvestingActivities',
-            'NetCashFromInvestingActivities',
-            
-            # Financing Activities
-            'ProceedsFromDebt',
-            'RepaymentsOfDebt',
-            'DividendsPaid',
-            'StockRepurchases',
-            'ProceedsFromStockIssuance',
-            'OtherFinancingActivities',
-            'NetCashFromFinancingActivities',
-            
-            # Net Change and Ending Balance
-            'EffectOfExchangeRateChanges',
-            'NetChangeInCash',
-            'CashAtBeginningOfPeriod',
-            'CashAtEndOfPeriod'
+            ('NetIncome', None),
+            ('DepreciationAndAmortization', 'OperatingAdjustments'),
+            ('StockBasedCompensation', 'OperatingAdjustments'),
+            ('DeferredIncomeTaxes', 'OperatingAdjustments'),
+            ('OperatingAdjustments', None),
+            ('ChangeInAccountsReceivable', 'WorkingCapitalChanges'),
+            ('ChangeInInventory', 'WorkingCapitalChanges'),
+            ('ChangeInAccountsPayable', 'WorkingCapitalChanges'),
+            ('ChangeInDeferredRevenue', 'WorkingCapitalChanges'),
+            ('ChangeInOtherWorkingCapital', 'WorkingCapitalChanges'),
+            ('WorkingCapitalChanges', None),
+            ('OtherOperatingActivities', 'OperatingActivities'),
+            ('OperatingActivities', None),
+            ('NetCashFromOperatingActivities', None),
+            ('CapitalExpenditures', 'InvestingActivities'),
+            ('Acquisitions', 'InvestingActivities'),
+            ('Investments', 'InvestingActivities'),
+            ('ProceedsFromInvestments', 'InvestingActivities'),
+            ('OtherInvestingActivities', 'InvestingActivities'),
+            ('InvestingActivities', None),
+            ('NetCashFromInvestingActivities', None),
+            ('ProceedsFromDebt', 'FinancingActivities'),
+            ('RepaymentsOfDebt', 'FinancingActivities'),
+            ('DividendsPaid', 'FinancingActivities'),
+            ('StockRepurchases', 'FinancingActivities'),
+            ('ProceedsFromStockIssuance', 'FinancingActivities'),
+            ('OtherFinancingActivities', 'FinancingActivities'),
+            ('FinancingActivities', None),
+            ('NetCashFromFinancingActivities', None),
+            ('EffectOfExchangeRateChanges', None),
+            ('NetChangeInCash', None),
+            ('CashAtBeginningOfPeriod', None),
+            ('CashAtEndOfPeriod', None),
         ]
-        
-        # Create combined DataFrame
-        combined_data = {}
-        
-        # Add income statement items
-        for item in income_order:
-            if item in income_df.columns:
-                for date in income_df.index:
-                    key = f"INCOME STATEMENT - {item}"
-                    if key not in combined_data:
-                        combined_data[key] = {}
-                    combined_data[key][date] = income_df.loc[date, item]
-        
-        # Add balance sheet items
-        for item in balance_order:
-            if item in balance_df.columns:
-                for date in balance_df.index:
-                    key = f"BALANCE SHEET - {item}"
-                    if key not in combined_data:
-                        combined_data[key] = {}
-                    combined_data[key][date] = balance_df.loc[date, item]
-        
-        # Add cash flow statement items
-        for item in cash_flow_order:
-            if item in cash_flow_df.columns:
-                for date in cash_flow_df.index:
-                    key = f"CASH FLOW - {item}"
-                    if key not in combined_data:
-                        combined_data[key] = {}
-                    combined_data[key][date] = cash_flow_df.loc[date, item]
-        
-        if combined_data:
-            combined_df = pd.DataFrame.from_dict(combined_data, orient='index')
-            combined_df = combined_df.sort_index()
-            return combined_df
+        # Helper to build section
+        def build_section(section_title, order, df):
+            rows = []
+            # Insert section heading
+            rows.append({
+                'Line Item': section_title,
+                'is_section_heading': True,
+                'is_aggregate': False,
+                'indent_level': 0
+            })
+            for item, parent in order:
+                if item in df.columns:
+                    for date in df.index:
+                        # Convert technical concept name to user-friendly title
+                        friendly_title = self._get_user_friendly_title(item)
+                        row = {
+                            'Line Item': friendly_title,
+                            'is_section_heading': False,
+                            'is_aggregate': parent is None and item.lower().startswith('total') or 'Net' in item or 'Gross' in item or 'Income' in item or 'Earnings' in item or 'OperatingIncome' in item or 'CashAtEndOfPeriod' == item,
+                            'indent_level': 0,
+                        }
+                        # Indent if has parent
+                        if parent:
+                            row['indent_level'] = 1
+                        # Add values for each period
+                        for col in df.columns:
+                            if col == item:
+                                row[date] = df.loc[date, item]
+                        rows.append(row)
+            return rows
+        # Build all sections
+        rows = []
+        rows += build_section('INCOME STATEMENT', income_order, income_df)
+        rows += build_section('BALANCE SHEET', balance_order, balance_df)
+        rows += build_section('CASH FLOW STATEMENT', cash_flow_order, cash_flow_df)
+        # Convert to DataFrame
+        if rows:
+            df = pd.DataFrame(rows)
+            df = df.fillna('')
+            return df
         else:
             return pd.DataFrame()
 
@@ -1728,7 +1418,7 @@ class SECFileSourcer:
         # INCOME STATEMENT - Core GAAP concepts (top priority)
         core_income_statement_metrics = {
             # Revenue (top line)
-            'Revenue': ['us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap:Revenues', 'us-gaap:SalesRevenueNet'],
+            'Revenue': ['us-gaap:Revenues', 'us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap:SalesRevenueNet'],
             
             # Cost of goods sold
             'CostOfGoodsSold': ['us-gaap:CostOfRevenue', 'us-gaap:CostOfGoodsAndServicesSold'],
@@ -2374,6 +2064,1249 @@ class SECFileSourcer:
         
         return True
 
+    def _classify_financial_line_item(self, line_item: str, available_concepts: List[str] = None) -> Dict[str, float]:
+        """
+        Classify a financial line item into the appropriate statement category using rules-based logic and fuzzy matching.
+        
+        Args:
+            line_item (str): The line item name to classify
+            available_concepts (List[str]): List of available XBRL concepts for validation
+            
+        Returns:
+            Dict[str, float]: Dictionary with statement type and confidence score
+                {
+                    'statement': 'income_statement' | 'balance_sheet' | 'cash_flow',
+                    'confidence': 0.0-1.0,
+                    'category': 'revenue' | 'expense' | 'asset' | 'liability' | 'equity' | 'operating' | 'investing' | 'financing'
+                }
+        """
+        import re
+        from difflib import SequenceMatcher
+        
+        # Normalize the line item for better matching
+        normalized_item = line_item.lower().strip()
+        
+        # Define comprehensive classification rules based on GAAP standards
+        
+        # INCOME STATEMENT CLASSIFICATION RULES
+        income_statement_patterns = {
+            # Revenue patterns (high confidence)
+            'revenue': {
+                'patterns': [
+                    r'revenue', r'sales', r'income.*contract', r'fee.*income', 
+                    r'commission.*income', r'royalty.*income', r'license.*income',
+                    r'product.*revenue', r'service.*revenue', r'net.*sales'
+                ],
+                'confidence': 0.95,
+                'category': 'revenue'
+            },
+            
+            # Cost of goods sold patterns (high confidence)
+            'cost_of_goods': {
+                'patterns': [
+                    r'cost.*goods', r'cost.*revenue', r'cost.*sales', r'cost.*services',
+                    r'cost.*products', r'cost.*contract', r'cost.*revenue.*contract'
+                ],
+                'confidence': 0.95,
+                'category': 'expense'
+            },
+            
+            # Operating expense patterns (high confidence)
+            'operating_expenses': {
+                'patterns': [
+                    r'research.*development', r'rd.*expense', r'selling.*general.*administrative',
+                    r'sga', r'operating.*expense', r'administrative.*expense',
+                    r'marketing.*expense', r'advertising.*expense', r'promotion.*expense'
+                ],
+                'confidence': 0.90,
+                'category': 'expense'
+            },
+            
+            # Depreciation and amortization (high confidence)
+            'depreciation': {
+                'patterns': [
+                    r'depreciation', r'amortization', r'depreciation.*amortization',
+                    r'accumulated.*depreciation', r'accumulated.*amortization'
+                ],
+                'confidence': 0.90,
+                'category': 'expense'
+            },
+            
+            # Stock-based compensation (high confidence)
+            'stock_compensation': {
+                'patterns': [
+                    r'stock.*based.*compensation', r'stock.*compensation', r'equity.*compensation',
+                    r'option.*expense', r'warrant.*expense', r'rsu.*expense'
+                ],
+                'confidence': 0.90,
+                'category': 'expense'
+            },
+            
+            # Restructuring and impairment (high confidence)
+            'restructuring': {
+                'patterns': [
+                    r'restructuring', r'impairment', r'write.*off', r'write.*down',
+                    r'goodwill.*impairment', r'intangible.*impairment'
+                ],
+                'confidence': 0.90,
+                'category': 'expense'
+            },
+            
+            # Operating income patterns (high confidence)
+            'operating_income': {
+                'patterns': [
+                    r'operating.*income', r'operating.*profit', r'operating.*loss',
+                    r'ebit', r'earnings.*before.*interest.*tax'
+                ],
+                'confidence': 0.95,
+                'category': 'income'
+            },
+            
+            # Interest patterns (high confidence)
+            'interest': {
+                'patterns': [
+                    r'interest.*expense', r'interest.*income', r'interest.*cost',
+                    r'interest.*revenue', r'interest.*paid', r'interest.*received'
+                ],
+                'confidence': 0.90,
+                'category': 'expense'
+            },
+            
+            # Tax patterns (high confidence)
+            'taxes': {
+                'patterns': [
+                    r'income.*tax', r'tax.*expense', r'tax.*benefit', r'provision.*tax',
+                    r'deferred.*tax', r'current.*tax', r'effective.*tax.*rate'
+                ],
+                'confidence': 0.95,
+                'category': 'expense'
+            },
+            
+            # Net income patterns (highest confidence)
+            'net_income': {
+                'patterns': [
+                    r'net.*income', r'net.*loss', r'net.*earnings', r'net.*profit',
+                    r'net.*income.*loss', r'comprehensive.*income', r'net.*income.*attributable'
+                ],
+                'confidence': 0.98,
+                'category': 'income'
+            },
+            
+            # Earnings per share patterns (high confidence)
+            'eps': {
+                'patterns': [
+                    r'earnings.*per.*share', r'eps', r'basic.*eps', r'diluted.*eps',
+                    r'weighted.*average.*shares', r'shares.*outstanding'
+                ],
+                'confidence': 0.90,
+                'category': 'metric'
+            }
+        }
+        
+        # BALANCE SHEET CLASSIFICATION RULES
+        balance_sheet_patterns = {
+            # Current assets patterns (high confidence)
+            'current_assets': {
+                'patterns': [
+                    r'cash.*equivalent', r'cash.*equivalents', r'cash.*restricted',
+                    r'accounts.*receivable', r'inventory', r'prepaid.*expense',
+                    r'short.*term.*investment', r'marketable.*security',
+                    r'current.*asset', r'asset.*current'
+                ],
+                'confidence': 0.95,
+                'category': 'asset'
+            },
+            
+            # Non-current assets patterns (high confidence)
+            'non_current_assets': {
+                'patterns': [
+                    r'property.*plant.*equipment', r'ppe', r'fixed.*asset',
+                    r'goodwill', r'intangible.*asset', r'long.*term.*investment',
+                    r'deferred.*tax.*asset', r'other.*asset.*noncurrent',
+                    r'noncurrent.*asset', r'asset.*noncurrent'
+                ],
+                'confidence': 0.95,
+                'category': 'asset'
+            },
+            
+            # Total assets patterns (highest confidence)
+            'total_assets': {
+                'patterns': [
+                    r'total.*asset', r'asset.*total', r'consolidated.*asset'
+                ],
+                'confidence': 0.98,
+                'category': 'asset'
+            },
+            
+            # Current liabilities patterns (high confidence)
+            'current_liabilities': {
+                'patterns': [
+                    r'accounts.*payable', r'accrued.*liability', r'accrued.*expense',
+                    r'deferred.*revenue', r'short.*term.*debt', r'current.*liability',
+                    r'liability.*current', r'note.*payable.*current'
+                ],
+                'confidence': 0.95,
+                'category': 'liability'
+            },
+            
+            # Non-current liabilities patterns (high confidence)
+            'non_current_liabilities': {
+                'patterns': [
+                    r'long.*term.*debt', r'deferred.*tax.*liability',
+                    r'other.*liability.*noncurrent', r'noncurrent.*liability',
+                    r'liability.*noncurrent', r'note.*payable.*noncurrent'
+                ],
+                'confidence': 0.95,
+                'category': 'liability'
+            },
+            
+            # Total liabilities patterns (highest confidence)
+            'total_liabilities': {
+                'patterns': [
+                    r'total.*liability', r'liability.*total', r'consolidated.*liability'
+                ],
+                'confidence': 0.98,
+                'category': 'liability'
+            },
+            
+            # Equity patterns (high confidence)
+            'equity': {
+                'patterns': [
+                    r'common.*stock', r'preferred.*stock', r'additional.*paid.*capital',
+                    r'retained.*earnings', r'treasury.*stock', r'accumulated.*other.*comprehensive',
+                    r'stockholders.*equity', r'shareholders.*equity', r'equity.*total',
+                    r'paid.*capital', r'capital.*stock'
+                ],
+                'confidence': 0.95,
+                'category': 'equity'
+            },
+            
+            # Working capital patterns (high confidence)
+            'working_capital': {
+                'patterns': [
+                    r'working.*capital', r'net.*working.*capital'
+                ],
+                'confidence': 0.90,
+                'category': 'metric'
+            }
+        }
+        
+        # CASH FLOW STATEMENT CLASSIFICATION RULES
+        cash_flow_patterns = {
+            # Operating activities patterns (high confidence)
+            'operating_activities': {
+                'patterns': [
+                    r'net.*cash.*operating', r'cash.*operating.*activity',
+                    r'operating.*cash.*flow', r'cash.*provided.*operating',
+                    r'cash.*used.*operating', r'net.*cash.*provided.*operating',
+                    r'operating.*activity', r'cash.*flow.*operating'
+                ],
+                'confidence': 0.95,
+                'category': 'operating'
+            },
+            
+            # Operating adjustments patterns (high confidence)
+            'operating_adjustments': {
+                'patterns': [
+                    r'depreciation.*amortization', r'stock.*based.*compensation',
+                    r'deferred.*income.*tax', r'deferred.*tax', r'provision.*bad.*debt',
+                    r'gain.*loss.*sale.*asset', r'impairment.*charge'
+                ],
+                'confidence': 0.90,
+                'category': 'operating'
+            },
+            
+            # Working capital changes patterns (high confidence)
+            'working_capital_changes': {
+                'patterns': [
+                    r'change.*account.*receivable', r'change.*inventory',
+                    r'change.*account.*payable', r'change.*deferred.*revenue',
+                    r'increase.*decrease.*receivable', r'increase.*decrease.*inventory',
+                    r'increase.*decrease.*payable', r'change.*working.*capital'
+                ],
+                'confidence': 0.90,
+                'category': 'operating'
+            },
+            
+            # Investing activities patterns (high confidence)
+            'investing_activities': {
+                'patterns': [
+                    r'net.*cash.*investing', r'cash.*investing.*activity',
+                    r'investing.*cash.*flow', r'cash.*provided.*investing',
+                    r'cash.*used.*investing', r'net.*cash.*provided.*investing',
+                    r'investing.*activity', r'cash.*flow.*investing'
+                ],
+                'confidence': 0.95,
+                'category': 'investing'
+            },
+            
+            # Capital expenditures patterns (high confidence)
+            'capital_expenditures': {
+                'patterns': [
+                    r'capital.*expenditure', r'capex', r'payment.*property.*plant.*equipment',
+                    r'payment.*ppe', r'acquisition.*property.*plant.*equipment',
+                    r'purchase.*property.*plant.*equipment'
+                ],
+                'confidence': 0.95,
+                'category': 'investing'
+            },
+            
+            # Acquisitions and investments patterns (high confidence)
+            'acquisitions_investments': {
+                'patterns': [
+                    r'acquisition.*business', r'payment.*acquire.*business',
+                    r'payment.*investment', r'proceeds.*sale.*investment',
+                    r'proceeds.*maturity.*investment', r'purchase.*investment',
+                    r'sale.*investment'
+                ],
+                'confidence': 0.90,
+                'category': 'investing'
+            },
+            
+            # Financing activities patterns (high confidence)
+            'financing_activities': {
+                'patterns': [
+                    r'net.*cash.*financing', r'cash.*financing.*activity',
+                    r'financing.*cash.*flow', r'cash.*provided.*financing',
+                    r'cash.*used.*financing', r'net.*cash.*provided.*financing',
+                    r'financing.*activity', r'cash.*flow.*financing'
+                ],
+                'confidence': 0.95,
+                'category': 'financing'
+            },
+            
+            # Debt financing patterns (high confidence)
+            'debt_financing': {
+                'patterns': [
+                    r'proceeds.*debt', r'proceeds.*issuance.*debt',
+                    r'repayment.*debt', r'repayment.*long.*term.*debt',
+                    r'borrowing.*debt', r'issuance.*debt'
+                ],
+                'confidence': 0.90,
+                'category': 'financing'
+            },
+            
+            # Equity financing patterns (high confidence)
+            'equity_financing': {
+                'patterns': [
+                    r'proceeds.*stock', r'proceeds.*issuance.*stock',
+                    r'proceeds.*common.*stock', r'proceeds.*preferred.*stock',
+                    r'repurchase.*stock', r'payment.*repurchase.*stock',
+                    r'dividend.*paid', r'payment.*dividend'
+                ],
+                'confidence': 0.90,
+                'category': 'financing'
+            },
+            
+            # Net change patterns (highest confidence)
+            'net_change': {
+                'patterns': [
+                    r'net.*change.*cash', r'net.*increase.*decrease.*cash',
+                    r'cash.*beginning.*period', r'cash.*end.*period',
+                    r'effect.*exchange.*rate', r'exchange.*rate.*effect'
+                ],
+                'confidence': 0.98,
+                'category': 'net_change'
+            }
+        }
+        
+        # Combine all patterns
+        all_patterns = {
+            'income_statement': income_statement_patterns,
+            'balance_sheet': balance_sheet_patterns,
+            'cash_flow': cash_flow_patterns
+        }
+        
+        # Initialize results
+        best_match = {
+            'statement': None,
+            'confidence': 0.0,
+            'category': None
+        }
+        
+        # Check each statement type
+        for statement_type, patterns in all_patterns.items():
+            for pattern_name, pattern_info in patterns.items():
+                for pattern in pattern_info['patterns']:
+                    if re.search(pattern, normalized_item, re.IGNORECASE):
+                        confidence = pattern_info['confidence']
+                        
+                        # Boost confidence for exact matches
+                        if normalized_item == pattern.lower():
+                            confidence = min(1.0, confidence + 0.05)
+                        
+                        # Boost confidence for partial word matches
+                        words = normalized_item.split()
+                        pattern_words = pattern.lower().split()
+                        word_matches = sum(1 for word in words if any(pword in word for pword in pattern_words))
+                        if word_matches > 0:
+                            confidence = min(1.0, confidence + (word_matches * 0.02))
+                        
+                        # Update best match if this is better
+                        if confidence > best_match['confidence']:
+                            best_match = {
+                                'statement': statement_type,
+                                'confidence': confidence,
+                                'category': pattern_info['category']
+                            }
+        
+        # Additional fuzzy matching for edge cases
+        if best_match['confidence'] < 0.7 and available_concepts:
+            # Try fuzzy matching with available concepts
+            for concept in available_concepts:
+                similarity = SequenceMatcher(None, normalized_item, concept.lower()).ratio()
+                if similarity > 0.8:
+                    # Use the fuzzy match result to help classify
+                    fuzzy_result = self._classify_financial_line_item(concept)
+                    if fuzzy_result['confidence'] > best_match['confidence']:
+                        best_match = {
+                            'statement': fuzzy_result['statement'],
+                            'confidence': fuzzy_result['confidence'] * 0.9,  # Slightly reduce confidence for fuzzy matches
+                            'category': fuzzy_result['category']
+                        }
+        
+        # Fallback rules for common patterns
+        if best_match['confidence'] < 0.5:
+            # Apply fallback rules
+            fallback_rules = [
+                # Income statement fallbacks
+                (r'expense|cost|charge|loss', 'income_statement', 0.6, 'expense'),
+                (r'income|profit|earnings|revenue', 'income_statement', 0.6, 'income'),
+                (r'eps|per.*share', 'income_statement', 0.7, 'metric'),
+                
+                # Balance sheet fallbacks
+                (r'asset|receivable|inventory|equipment', 'balance_sheet', 0.6, 'asset'),
+                (r'liability|payable|debt|obligation', 'balance_sheet', 0.6, 'liability'),
+                (r'equity|stock|capital|retained', 'balance_sheet', 0.6, 'equity'),
+                
+                # Cash flow fallbacks
+                (r'cash.*flow|cash.*provided|cash.*used', 'cash_flow', 0.7, 'operating'),
+                (r'change.*cash|increase.*decrease.*cash', 'cash_flow', 0.7, 'net_change'),
+            ]
+            
+            for pattern, statement, confidence, category in fallback_rules:
+                if re.search(pattern, normalized_item, re.IGNORECASE):
+                    if confidence > best_match['confidence']:
+                        best_match = {
+                            'statement': statement,
+                            'confidence': confidence,
+                            'category': category
+                        }
+        
+        return best_match
+
+    def _validate_statement_classification(self, line_item: str, statement_type: str, available_concepts: List[str] = None) -> bool:
+        """
+        Validate that a line item is correctly classified into its statement type.
+        
+        Args:
+            line_item (str): The line item name
+            statement_type (str): The proposed statement type
+            available_concepts (List[str]): List of available XBRL concepts for validation
+            
+        Returns:
+            bool: True if classification is valid, False otherwise
+        """
+        classification = self._classify_financial_line_item(line_item, available_concepts)
+        
+        # Check if the classification matches the proposed statement type
+        if classification['statement'] == statement_type:
+            return True
+        
+        # If confidence is very low, we might want to reclassify
+        if classification['confidence'] > 0.8 and classification['statement'] != statement_type:
+            return False
+        
+        # For moderate confidence, check if the proposed type makes sense
+        if classification['confidence'] > 0.6:
+            # Allow some flexibility for edge cases
+            return True
+        
+        return True  # Default to accepting the classification
+
+    def _auto_classify_and_validate_line_items(self, comprehensive_facts: Dict, progress_callback=None) -> Dict[str, Dict[str, str]]:
+        """
+        Automatically classify line items into appropriate financial statements using the classification system.
+        
+        Args:
+            comprehensive_facts (Dict): Dictionary of all available XBRL facts
+            progress_callback: Optional progress callback function
+            
+        Returns:
+            Dict[str, Dict[str, str]]: Dictionary mapping statement types to line item classifications
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        progress("    • Auto-classifying line items into financial statements...")
+        
+        # Get all available concepts
+        available_concepts = list(comprehensive_facts.keys())
+        
+        # Initialize classification results
+        classifications = {
+            'income_statement': {},
+            'balance_sheet': {},
+            'cash_flow': {}
+        }
+        
+        # Track classification statistics
+        stats = {
+            'total_items': len(available_concepts),
+            'classified_items': 0,
+            'high_confidence': 0,
+            'medium_confidence': 0,
+            'low_confidence': 0,
+            'unclassified': 0
+        }
+        
+        # Classify each concept
+        for concept in available_concepts:
+            # Extract the concept name (remove namespace prefix)
+            concept_name = concept.split(':')[-1] if ':' in concept else concept
+            
+            # Classify the line item
+            classification = self._classify_financial_line_item(concept_name, available_concepts)
+            
+            if classification['statement']:
+                statement_type = classification['statement']
+                confidence = classification['confidence']
+                category = classification['category']
+                
+                # Store the classification
+                classifications[statement_type][concept] = {
+                    'confidence': confidence,
+                    'category': category,
+                    'concept_name': concept_name
+                }
+                
+                stats['classified_items'] += 1
+                
+                # Track confidence levels
+                if confidence >= 0.8:
+                    stats['high_confidence'] += 1
+                elif confidence >= 0.6:
+                    stats['medium_confidence'] += 1
+                else:
+                    stats['low_confidence'] += 1
+            else:
+                stats['unclassified'] += 1
+        
+        # Report classification statistics
+        progress(f"    • Classification complete:")
+        progress(f"      - Total items: {stats['total_items']}")
+        progress(f"      - Classified: {stats['classified_items']} ({stats['classified_items']/stats['total_items']*100:.1f}%)")
+        progress(f"      - High confidence (≥80%): {stats['high_confidence']}")
+        progress(f"      - Medium confidence (60-79%): {stats['medium_confidence']}")
+        progress(f"      - Low confidence (<60%): {stats['low_confidence']}")
+        progress(f"      - Unclassified: {stats['unclassified']}")
+        
+        # Report breakdown by statement
+        for statement_type, items in classifications.items():
+            if items:
+                high_conf = sum(1 for item in items.values() if item['confidence'] >= 0.8)
+                progress(f"      - {statement_type.replace('_', ' ').title()}: {len(items)} items ({high_conf} high confidence)")
+        
+        return classifications
+
+    def _create_improved_financial_model(self, comprehensive_facts: Dict, annual_data: Dict, quarterly_data: Dict, 
+                                       enhanced_fuzzy_matching: bool = True, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """
+        Create an improved financial model using the new classification system.
+        
+        Args:
+            comprehensive_facts (Dict): All available XBRL facts
+            annual_data (Dict): Annual data points
+            quarterly_data (Dict): Quarterly data points
+            enhanced_fuzzy_matching (bool): Whether to use enhanced fuzzy matching
+            progress_callback: Optional progress callback function
+            
+        Returns:
+            Dict[str, pd.DataFrame]: Improved financial model with better classification
+        """
+        def progress(msg):
+            if progress_callback:
+                progress_callback(msg)
+            else:
+                print(msg)
+        
+        progress("    • Creating improved financial model with enhanced classification...")
+        
+        # Auto-classify all line items
+        classifications = self._auto_classify_and_validate_line_items(comprehensive_facts, progress_callback)
+        
+        # Initialize financial model
+        financial_model = {
+            'annual_income_statement': pd.DataFrame(),
+            'annual_balance_sheet': pd.DataFrame(),
+            'annual_cash_flow': pd.DataFrame(),
+            'quarterly_income_statement': pd.DataFrame(),
+            'quarterly_balance_sheet': pd.DataFrame(),
+            'quarterly_cash_flow': pd.DataFrame()
+        }
+        
+        # Process each statement type
+        for statement_type, classified_items in classifications.items():
+            if not classified_items:
+                continue
+                
+            progress(f"    • Processing {statement_type.replace('_', ' ')} items...")
+            
+            # Filter items by confidence level (focus on high and medium confidence)
+            high_confidence_items = {k: v for k, v in classified_items.items() if v['confidence'] >= 0.6}
+            
+            if not high_confidence_items:
+                progress(f"      ⚠ No high-confidence items found for {statement_type}")
+                continue
+            
+            # Create mapping for this statement type
+            statement_mapping = {}
+            for concept, info in high_confidence_items.items():
+                concept_name = info['concept_name']
+                # Use the classified concept name as the key
+                statement_mapping[concept_name] = concept
+            
+            progress(f"      ✓ Found {len(high_confidence_items)} high-confidence items")
+            
+            # Create DataFrames for annual and quarterly data
+            for period in ['annual', 'quarterly']:
+                data_source = annual_data if period == 'annual' else quarterly_data
+                
+                # Extract data for this statement type
+                statement_data = {}
+                for concept, info in high_confidence_items.items():
+                    if concept in data_source:
+                        # Group data by date
+                        for data_point in data_source[concept]:
+                            date = data_point.get('end', '')
+                            value = data_point.get('val', 0)
+                            
+                            if date not in statement_data:
+                                statement_data[date] = {}
+                            
+                            concept_name = info['concept_name']
+                            statement_data[date][concept_name] = value
+                
+                if statement_data:
+                    # Create DataFrame
+                    df = pd.DataFrame.from_dict(statement_data, orient='index')
+                    df.index = pd.to_datetime(df.index)
+                    df = df.sort_index()
+                    
+                    # Store in financial model
+                    key = f'{period}_{statement_type}'
+                    financial_model[key] = df
+                    
+                    progress(f"      ✓ {period.title()}: {len(df)} periods, {len(df.columns)} line items")
+                else:
+                    progress(f"      ⚠ No {period} data found for {statement_type}")
+        
+        # Validate the financial model
+        progress("    • Validating financial model...")
+        validation_results = self._validate_financial_model_consistency(financial_model)
+        
+        for statement_type, result in validation_results.items():
+            if result['valid']:
+                progress(f"      ✓ {statement_type}: Valid ({result['data_points']} data points)")
+            else:
+                progress(f"      ⚠ {statement_type}: {result['issues']}")
+        
+        progress("    ✓ Improved financial model created successfully!")
+        return financial_model
+
+    def _validate_financial_model_consistency(self, financial_model: Dict[str, pd.DataFrame]) -> Dict[str, Dict]:
+        """
+        Validate the consistency and quality of the financial model.
+        
+        Args:
+            financial_model (Dict[str, pd.DataFrame]): The financial model to validate
+            
+        Returns:
+            Dict[str, Dict]: Validation results for each statement type
+        """
+        validation_results = {}
+        
+        for statement_type, df in financial_model.items():
+            result = {
+                'valid': False,
+                'data_points': 0,
+                'issues': []
+            }
+            
+            if df.empty:
+                result['issues'].append("No data available")
+            else:
+                result['data_points'] = len(df) * len(df.columns)
+                
+                # Check for basic data quality
+                if df.isnull().all().all():
+                    result['issues'].append("All data is null")
+                elif df.isnull().sum().sum() > len(df) * len(df.columns) * 0.5:
+                    result['issues'].append("More than 50% of data is null")
+                else:
+                    result['valid'] = True
+                    
+                    # Check for reasonable value ranges
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns
+                    for col in numeric_cols:
+                        if df[col].abs().max() > 1e15:  # Very large numbers
+                            result['issues'].append(f"Unusually large values in {col}")
+                        elif df[col].abs().min() > 0 and df[col].abs().min() < 1e-10:  # Very small numbers
+                            result['issues'].append(f"Unusually small values in {col}")
+            
+            validation_results[statement_type] = result
+        
+        return validation_results
+
+    def _create_user_friendly_title_mapping(self) -> Dict[str, str]:
+        """
+        Create a mapping from technical GAAP concept names to user-friendly, descriptive titles.
+        
+        Returns:
+            Dict[str, str]: Mapping from concept names to user-friendly titles
+        """
+        return {
+            # Income Statement - Revenue Section
+            'RevenueFromContractWithCustomerExcludingAssessedTax': 'Revenue',
+            'Revenues': 'Revenue',
+            'SalesRevenueNet': 'Revenue',
+            'RevenueFromContractWithCustomer': 'Revenue',
+            'SalesRevenueGoodsNet': 'Product Revenue',
+            'SalesRevenueServicesNet': 'Service Revenue',
+            'SalesRevenueNetOfReturnsAndAllowances': 'Net Sales',
+            
+            # Cost of Revenue
+            'CostOfRevenue': 'Cost of Revenue',
+            'CostOfGoodsAndServicesSold': 'Cost of Goods Sold',
+            'CostOfGoodsSold': 'Cost of Goods Sold',
+            'CostOfRevenueExcludingDepreciationAndAmortization': 'Cost of Revenue (ex. D&A)',
+            
+            # Gross Profit
+            'GrossProfit': 'Gross Profit',
+            'GrossProfitLoss': 'Gross Profit',
+            
+            # Operating Expenses
+            'ResearchAndDevelopmentExpense': 'Research & Development',
+            'SellingGeneralAndAdministrativeExpense': 'Selling, General & Administrative',
+            'SellingAndMarketingExpense': 'Selling & Marketing',
+            'GeneralAndAdministrativeExpense': 'General & Administrative',
+            'MarketingExpense': 'Marketing',
+            'AdvertisingExpense': 'Advertising',
+            'PromotionalExpense': 'Promotional',
+            
+            # Depreciation and Amortization
+            'DepreciationAndAmortization': 'Depreciation & Amortization',
+            'Depreciation': 'Depreciation',
+            'AmortizationOfIntangibleAssets': 'Amortization',
+            'AmortizationOfDeferredCharges': 'Amortization of Deferred Charges',
+            
+            # Stock-based Compensation
+            'StockBasedCompensationExpense': 'Stock-Based Compensation',
+            'CompensationAndRelatedExpense': 'Compensation Expense',
+            'EmployeeCompensationExpense': 'Employee Compensation',
+            
+            # Restructuring and Impairment
+            'RestructuringCharges': 'Restructuring Charges',
+            'ImpairmentCharges': 'Impairment Charges',
+            'GoodwillImpairmentLoss': 'Goodwill Impairment',
+            'IntangibleAssetsImpairmentLoss': 'Intangible Asset Impairment',
+            'AssetImpairmentCharges': 'Asset Impairment',
+            
+            # Operating Income
+            'OperatingIncomeLoss': 'Operating Income',
+            'OperatingExpenses': 'Operating Expenses',
+            'OtherOperatingExpenses': 'Other Operating Expenses',
+            'OtherOperatingIncomeExpense': 'Other Operating Income/(Expense)',
+            
+            # Non-Operating Items
+            'InterestExpense': 'Interest Expense',
+            'InterestIncome': 'Interest Income',
+            'InterestExpenseDebt': 'Interest Expense on Debt',
+            'InterestExpenseCapitalized': 'Capitalized Interest',
+            'InterestIncomeExpenseNet': 'Net Interest Income/(Expense)',
+            
+            # Gains and Losses
+            'GainLossOnSaleOfAssets': 'Gain/(Loss) on Asset Sales',
+            'GainLossOnSaleOfPropertyPlantEquipment': 'Gain/(Loss) on PP&E Sales',
+            'GainLossOnSaleOfInvestments': 'Gain/(Loss) on Investment Sales',
+            'GainLossOnSaleOfBusiness': 'Gain/(Loss) on Business Sales',
+            
+            # Foreign Currency
+            'ForeignCurrencyGainLoss': 'Foreign Currency Gain/(Loss)',
+            'ForeignCurrencyTransactionGainLoss': 'Foreign Currency Transaction Gain/(Loss)',
+            
+            # Other Income/Expense
+            'OtherIncomeExpenseNet': 'Other Income/(Expense)',
+            'OtherNonoperatingIncomeExpense': 'Other Non-Operating Income/(Expense)',
+            'MiscellaneousIncomeExpense': 'Miscellaneous Income/(Expense)',
+            
+            # Income Before Taxes
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxes': 'Income Before Taxes',
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic': 'Income Before Taxes (Domestic)',
+            'IncomeLossFromContinuingOperationsBeforeIncomeTaxesForeign': 'Income Before Taxes (Foreign)',
+            
+            # Income Taxes
+            'IncomeTaxExpenseBenefit': 'Income Tax Expense',
+            'ProvisionForIncomeTaxes': 'Income Tax Provision',
+            'CurrentIncomeTaxExpense': 'Current Income Tax',
+            'DeferredIncomeTaxExpense': 'Deferred Income Tax',
+            'EffectiveIncomeTaxRateReconciliation': 'Effective Tax Rate',
+            
+            # Net Income
+            'NetIncomeLoss': 'Net Income',
+            'NetIncomeLossAvailableToCommonStockholdersBasic': 'Net Income Available to Common',
+            'NetIncomeLossAttributableToParent': 'Net Income Attributable to Parent',
+            'NetIncomeLossAttributableToNoncontrollingInterest': 'Net Income Attributable to Noncontrolling Interest',
+            
+            # Earnings Per Share
+            'EarningsPerShareBasic': 'EPS (Basic)',
+            'EarningsPerShareDiluted': 'EPS (Diluted)',
+            'WeightedAverageNumberOfSharesOutstandingBasic': 'Weighted Average Shares (Basic)',
+            'WeightedAverageNumberOfSharesOutstandingDiluted': 'Weighted Average Shares (Diluted)',
+            
+            # Balance Sheet - Current Assets
+            'CashAndCashEquivalentsAtCarryingValue': 'Cash & Cash Equivalents',
+            'Cash': 'Cash',
+            'CashEquivalentsAtCarryingValue': 'Cash Equivalents',
+            'RestrictedCash': 'Restricted Cash',
+            'ShortTermInvestments': 'Short-Term Investments',
+            'MarketableSecurities': 'Marketable Securities',
+            'AccountsReceivableNet': 'Accounts Receivable',
+            'AccountsReceivableGross': 'Gross Accounts Receivable',
+            'AllowanceForDoubtfulAccountsReceivable': 'Allowance for Doubtful Accounts',
+            'InventoryNet': 'Inventory',
+            'InventoryGross': 'Gross Inventory',
+            'InventoryReserves': 'Inventory Reserves',
+            'PrepaidExpensesAndOtherCurrentAssets': 'Prepaid Expenses & Other Current Assets',
+            'PrepaidExpense': 'Prepaid Expenses',
+            'OtherAssetsCurrent': 'Other Current Assets',
+            
+            # Non-Current Assets
+            'PropertyPlantAndEquipmentNet': 'Property, Plant & Equipment (Net)',
+            'PropertyPlantAndEquipmentGross': 'Property, Plant & Equipment (Gross)',
+            'AccumulatedDepreciationDepletionAndAmortizationPropertyPlantAndEquipment': 'Accumulated Depreciation',
+            'LandAndBuildings': 'Land & Buildings',
+            'MachineryAndEquipment': 'Machinery & Equipment',
+            'ComputerSoftwareAndEquipment': 'Computer Software & Equipment',
+            'ConstructionInProgress': 'Construction in Progress',
+            'Goodwill': 'Goodwill',
+            'IntangibleAssetsNet': 'Intangible Assets (Net)',
+            'IntangibleAssetsGross': 'Intangible Assets (Gross)',
+            'AccumulatedAmortizationOfIntangibleAssets': 'Accumulated Amortization',
+            'LongTermInvestments': 'Long-Term Investments',
+            'InvestmentsInAffiliates': 'Investments in Affiliates',
+            'DeferredTaxAssetsNet': 'Deferred Tax Assets',
+            'DeferredTaxAssetsGross': 'Deferred Tax Assets (Gross)',
+            'OtherAssetsNoncurrent': 'Other Non-Current Assets',
+            
+            # Current Liabilities
+            'AccountsPayable': 'Accounts Payable',
+            'AccountsPayableCurrent': 'Accounts Payable',
+            'AccruedLiabilitiesCurrent': 'Accrued Liabilities',
+            'AccruedExpenses': 'Accrued Expenses',
+            'AccruedCompensationAndBenefits': 'Accrued Compensation & Benefits',
+            'AccruedIncomeTaxesCurrent': 'Accrued Income Taxes',
+            'DeferredRevenueCurrent': 'Deferred Revenue',
+            'ContractWithCustomerLiability': 'Contract Liability',
+            'ShortTermDebt': 'Short-Term Debt',
+            'CommercialPaper': 'Commercial Paper',
+            'CurrentMaturitiesOfLongTermDebt': 'Current Portion of Long-Term Debt',
+            'OtherLiabilitiesCurrent': 'Other Current Liabilities',
+            
+            # Non-Current Liabilities
+            'LongTermDebt': 'Long-Term Debt',
+            'LongTermDebtNoncurrent': 'Long-Term Debt',
+            'NotesPayable': 'Notes Payable',
+            'BondsPayable': 'Bonds Payable',
+            'DeferredTaxLiabilitiesNet': 'Deferred Tax Liabilities',
+            'DeferredTaxLiabilitiesGross': 'Deferred Tax Liabilities (Gross)',
+            'DeferredRevenueNoncurrent': 'Deferred Revenue (Non-Current)',
+            'OtherLiabilitiesNoncurrent': 'Other Non-Current Liabilities',
+            
+            # Stockholders' Equity
+            'CommonStockValue': 'Common Stock',
+            'CommonStockSharesAuthorized': 'Common Stock (Authorized)',
+            'CommonStockSharesIssued': 'Common Stock (Issued)',
+            'CommonStockSharesOutstanding': 'Common Stock (Outstanding)',
+            'PreferredStockValue': 'Preferred Stock',
+            'PreferredStockSharesAuthorized': 'Preferred Stock (Authorized)',
+            'PreferredStockSharesIssued': 'Preferred Stock (Issued)',
+            'AdditionalPaidInCapital': 'Additional Paid-In Capital',
+            'PaidInCapital': 'Paid-In Capital',
+            'RetainedEarningsAccumulatedDeficit': 'Retained Earnings',
+            'RetainedEarnings': 'Retained Earnings',
+            'AccumulatedDeficit': 'Accumulated Deficit',
+            'AccumulatedOtherComprehensiveIncomeLossNetOfTax': 'Accumulated Other Comprehensive Income',
+            'TreasuryStockValue': 'Treasury Stock',
+            'TreasuryStockShares': 'Treasury Stock (Shares)',
+            'StockholdersEquity': 'Stockholders\' Equity',
+            'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest': 'Total Stockholders\' Equity',
+            
+            # Cash Flow Statement - Operating Activities
+            'NetCashProvidedByUsedInOperatingActivities': 'Net Cash from Operating Activities',
+            'NetCashProvidedByOperatingActivities': 'Net Cash from Operating Activities',
+            'NetCashUsedInOperatingActivities': 'Net Cash Used in Operating Activities',
+            'CashAndCashEquivalentsPeriodIncreaseDecrease': 'Net Change in Cash',
+            'NetIncomeLoss': 'Net Income',
+            'DepreciationAndAmortization': 'Depreciation & Amortization',
+            'Depreciation': 'Depreciation',
+            'AmortizationOfIntangibleAssets': 'Amortization',
+            'StockBasedCompensationExpense': 'Stock-Based Compensation',
+            'DeferredIncomeTaxExpenseBenefit': 'Deferred Income Taxes',
+            'DeferredTaxExpenseBenefit': 'Deferred Taxes',
+            'ProvisionForDoubtfulAccounts': 'Provision for Doubtful Accounts',
+            'GainLossOnSaleOfAssets': 'Gain/(Loss) on Asset Sales',
+            'GainLossOnSaleOfPropertyPlantEquipment': 'Gain/(Loss) on PP&E Sales',
+            'ImpairmentCharges': 'Impairment Charges',
+            'RestructuringCharges': 'Restructuring Charges',
+            
+            # Working Capital Changes
+            'IncreaseDecreaseInAccountsReceivable': 'Change in Accounts Receivable',
+            'IncreaseDecreaseInInventory': 'Change in Inventory',
+            'IncreaseDecreaseInPrepaidExpenses': 'Change in Prepaid Expenses',
+            'IncreaseDecreaseInAccountsPayable': 'Change in Accounts Payable',
+            'IncreaseDecreaseInAccruedLiabilities': 'Change in Accrued Liabilities',
+            'IncreaseDecreaseInDeferredRevenue': 'Change in Deferred Revenue',
+            'IncreaseDecreaseInOtherWorkingCapital': 'Change in Other Working Capital',
+            'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations': 'Net Cash from Operating Activities (Continuing)',
+            
+            # Investing Activities
+            'NetCashProvidedByUsedInInvestingActivities': 'Net Cash from Investing Activities',
+            'NetCashProvidedByInvestingActivities': 'Net Cash from Investing Activities',
+            'NetCashUsedInInvestingActivities': 'Net Cash Used in Investing Activities',
+            'PaymentsToAcquirePropertyPlantAndEquipment': 'Capital Expenditures',
+            'CapitalExpenditures': 'Capital Expenditures',
+            'PaymentsToAcquireBusinessesNetOfCashAcquired': 'Acquisitions (Net of Cash)',
+            'PaymentsToAcquireBusinesses': 'Acquisitions',
+            'ProceedsFromSaleOfBusinesses': 'Proceeds from Business Sales',
+            'PaymentsToAcquireInvestments': 'Payments for Investments',
+            'ProceedsFromSaleOfInvestments': 'Proceeds from Investment Sales',
+            'ProceedsFromMaturitiesPrepaymentsAndCallsOfAvailableForSaleSecurities': 'Proceeds from Securities Maturity',
+            'ProceedsFromSaleOfAvailableForSaleSecurities': 'Proceeds from Securities Sales',
+            'PaymentsToAcquireAvailableForSaleSecurities': 'Payments for Securities',
+            'ProceedsFromSaleOfPropertyPlantAndEquipment': 'Proceeds from PP&E Sales',
+            'ProceedsFromSaleOfDecommissionedProperty': 'Proceeds from Asset Sales',
+            'OtherInvestingActivities': 'Other Investing Activities',
+            
+            # Financing Activities
+            'NetCashProvidedByUsedInFinancingActivities': 'Net Cash from Financing Activities',
+            'NetCashProvidedByFinancingActivities': 'Net Cash from Financing Activities',
+            'NetCashUsedInFinancingActivities': 'Net Cash Used in Financing Activities',
+            'ProceedsFromIssuanceOfLongTermDebt': 'Proceeds from Debt Issuance',
+            'ProceedsFromIssuanceOfDebt': 'Proceeds from Debt',
+            'RepaymentsOfLongTermDebt': 'Repayments of Long-Term Debt',
+            'RepaymentsOfDebt': 'Repayments of Debt',
+            'ProceedsFromIssuanceOfCommonStock': 'Proceeds from Common Stock Issuance',
+            'ProceedsFromIssuanceOfPreferredStock': 'Proceeds from Preferred Stock Issuance',
+            'ProceedsFromStockOptionsExercised': 'Proceeds from Stock Options',
+            'PaymentsForRepurchaseOfCommonStock': 'Stock Repurchases',
+            'PaymentsForRepurchaseOfPreferredStock': 'Preferred Stock Repurchases',
+            'DividendsPaid': 'Dividends Paid',
+            'DividendsPaidCommon': 'Common Stock Dividends',
+            'DividendsPaidPreferred': 'Preferred Stock Dividends',
+            'OtherFinancingActivities': 'Other Financing Activities',
+            
+            # Net Change and Ending Balance
+            'EffectOfExchangeRateOnCashAndCashEquivalents': 'Effect of Exchange Rate Changes',
+            'CashAndCashEquivalentsAtCarryingValue': 'Cash & Cash Equivalents',
+            'CashAndCashEquivalentsPeriodIncreaseDecrease': 'Net Change in Cash',
+            'CashAndCashEquivalentsBeginningOfPeriod': 'Cash at Beginning of Period',
+            'CashAndCashEquivalentsEndOfPeriod': 'Cash at End of Period',
+            
+            # Additional Common Patterns
+            'Other': 'Other',
+            'OtherExpense': 'Other Expense',
+            'OtherIncome': 'Other Income',
+            'MiscellaneousExpense': 'Miscellaneous Expense',
+            'MiscellaneousIncome': 'Miscellaneous Income',
+            'NonoperatingIncomeExpense': 'Non-Operating Income/(Expense)',
+            'NonoperatingExpense': 'Non-Operating Expense',
+            'NonoperatingIncome': 'Non-Operating Income',
+            
+            # Working Capital and Financial Metrics
+            'WorkingCapital': 'Working Capital',
+            'NetWorkingCapital': 'Net Working Capital',
+            'TotalDebt': 'Total Debt',
+            'NetDebt': 'Net Debt',
+            'TotalEquity': 'Total Equity',
+            'TotalAssets': 'Total Assets',
+            'TotalLiabilities': 'Total Liabilities',
+            'TotalLiabilitiesAndStockholdersEquity': 'Total Liabilities & Equity',
+            
+            # Ratios and Metrics
+            'CurrentRatio': 'Current Ratio',
+            'QuickRatio': 'Quick Ratio',
+            'DebtToEquityRatio': 'Debt-to-Equity Ratio',
+            'ReturnOnEquity': 'Return on Equity',
+            'ReturnOnAssets': 'Return on Assets',
+            'GrossMargin': 'Gross Margin',
+            'OperatingMargin': 'Operating Margin',
+            'NetMargin': 'Net Margin',
+            'EBITDA': 'EBITDA',
+            'EBIT': 'EBIT',
+            'EBITDAR': 'EBITDAR'
+        }
+    
+    def _get_user_friendly_title(self, concept_name: str) -> str:
+        """
+        Convert a technical GAAP concept name to a user-friendly title.
+        
+        Args:
+            concept_name (str): The technical concept name
+            
+        Returns:
+            str: User-friendly title
+        """
+        # Get the title mapping
+        title_mapping = self._create_user_friendly_title_mapping()
+        
+        # Try exact match first
+        if concept_name in title_mapping:
+            return title_mapping[concept_name]
+        
+        # Try case-insensitive match
+        for key, value in title_mapping.items():
+            if key.lower() == concept_name.lower():
+                return value
+        
+        # Remove common prefixes and try again
+        prefixes_to_remove = ['us-gaap:', 'dei:', 'srt:', 'us-gaap-']
+        clean_name = concept_name
+        for prefix in prefixes_to_remove:
+            if clean_name.lower().startswith(prefix.lower()):
+                clean_name = clean_name[len(prefix):]
+                break
+        
+        # Try mapping with cleaned name
+        if clean_name in title_mapping:
+            return title_mapping[clean_name]
+        
+        # Try case-insensitive match with cleaned name
+        for key, value in title_mapping.items():
+            if key.lower() == clean_name.lower():
+                return value
+        
+        # If no exact match, try to create a user-friendly title from the concept name
+        return self._create_friendly_title_from_concept(concept_name)
+    
+    def _create_friendly_title_from_concept(self, concept_name: str) -> str:
+        """
+        Create a user-friendly title from a concept name when no mapping exists.
+        
+        Args:
+            concept_name (str): The technical concept name
+            
+        Returns:
+            str: User-friendly title
+        """
+        import re
+        
+        # Remove common prefixes
+        prefixes_to_remove = ['us-gaap:', 'dei:', 'srt:', 'us-gaap-']
+        clean_name = concept_name
+        for prefix in prefixes_to_remove:
+            if clean_name.lower().startswith(prefix.lower()):
+                clean_name = clean_name[len(prefix):]
+                break
+        
+        # Convert camelCase to Title Case with spaces
+        clean_name = re.sub(r'([a-z])([A-Z])', r'\1 \2', clean_name)
+        
+        # Handle common abbreviations
+        abbreviations = {
+            'PPE': 'PP&E',
+            'SG&A': 'SG&A',
+            'R&D': 'R&D',
+            'EPS': 'EPS',
+            'EBITDA': 'EBITDA',
+            'EBIT': 'EBIT',
+            'ROE': 'ROE',
+            'ROA': 'ROA',
+            'D&A': 'D&A'
+        }
+        
+        for abbr, replacement in abbreviations.items():
+            clean_name = clean_name.replace(abbr, replacement)
+        
+        # Capitalize properly
+        clean_name = clean_name.title()
+        
+        # Handle special cases
+        clean_name = clean_name.replace('And', '&')
+        clean_name = clean_name.replace('Or', 'or')
+        clean_name = clean_name.replace('Of', 'of')
+        clean_name = clean_name.replace('In', 'in')
+        clean_name = clean_name.replace('On', 'on')
+        clean_name = clean_name.replace('At', 'at')
+        clean_name = clean_name.replace('To', 'to')
+        clean_name = clean_name.replace('For', 'for')
+        clean_name = clean_name.replace('From', 'from')
+        clean_name = clean_name.replace('With', 'with')
+        clean_name = clean_name.replace('Net', 'Net')
+        clean_name = clean_name.replace('Gross', 'Gross')
+        clean_name = clean_name.replace('Current', 'Current')
+        clean_name = clean_name.replace('Noncurrent', 'Non-Current')
+        clean_name = clean_name.replace('Longterm', 'Long-Term')
+        clean_name = clean_name.replace('Shortterm', 'Short-Term')
+        
+        # Clean up multiple spaces
+        clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+        
+        return clean_name
+
+    def _create_user_friendly_parent_map(self) -> Dict[str, str]:
+        """
+        Create a parent-child mapping for indentation using user-friendly titles.
+        
+        Returns:
+            Dict[str, str]: Parent-child mapping with user-friendly titles
+        """
+        return {
+            # Income Statement - Standard format
+            'Revenue': None,  # Top level
+            'Cost of Revenue': 'Revenue',
+            'Cost of Goods Sold': 'Revenue',
+            'Gross Profit': None,  # Calculated total
+            
+            # Operating expenses
+            'Research & Development': 'Operating Expenses',
+            'Selling, General & Administrative': 'Operating Expenses',
+            'Selling & Marketing': 'Operating Expenses',
+            'General & Administrative': 'Operating Expenses',
+            'Marketing': 'Operating Expenses',
+            'Advertising': 'Operating Expenses',
+            'Depreciation & Amortization': 'Operating Expenses',
+            'Stock-Based Compensation': 'Operating Expenses',
+            'Restructuring Charges': 'Operating Expenses',
+            'Impairment Charges': 'Operating Expenses',
+            'Other Operating Expenses': 'Operating Expenses',
+            'Operating Expenses': None,  # Subtotal
+            
+            'Operating Income': None,  # Total
+            
+            # Non-operating items
+            'Interest Income': 'Non-Operating Income',
+            'Interest Expense': 'Non-Operating Income',
+            'Gain/(Loss) on Asset Sales': 'Non-Operating Income',
+            'Foreign Currency Gain/(Loss)': 'Non-Operating Income',
+            'Other Income/(Expense)': 'Non-Operating Income',
+            'Non-Operating Income': None,  # Subtotal
+            
+            'Income Before Taxes': None,  # Total
+            'Income Tax Expense': 'Income Before Taxes',
+            'Net Income': None,  # Final total
+            
+            # Earnings per share
+            'EPS (Basic)': 'Net Income',
+            'EPS (Diluted)': 'Net Income',
+            'Weighted Average Shares (Basic)': 'Net Income',
+            'Weighted Average Shares (Diluted)': 'Net Income',
+            
+            # Balance Sheet - Standard format: Assets = Liabilities + Equity
+            # Current Assets
+            'Cash & Cash Equivalents': 'Current Assets',
+            'Cash': 'Current Assets',
+            'Cash Equivalents': 'Current Assets',
+            'Restricted Cash': 'Current Assets',
+            'Short-Term Investments': 'Current Assets',
+            'Marketable Securities': 'Current Assets',
+            'Accounts Receivable': 'Current Assets',
+            'Inventory': 'Current Assets',
+            'Prepaid Expenses': 'Current Assets',
+            'Other Current Assets': 'Current Assets',
+            'Current Assets': None,  # Subtotal
+            
+            # Non-Current Assets
+            'Property, Plant & Equipment (Net)': 'Non-Current Assets',
+            'Goodwill': 'Non-Current Assets',
+            'Intangible Assets (Net)': 'Non-Current Assets',
+            'Long-Term Investments': 'Non-Current Assets',
+            'Deferred Tax Assets': 'Non-Current Assets',
+            'Other Non-Current Assets': 'Non-Current Assets',
+            'Non-Current Assets': None,  # Subtotal
+            
+            'Total Assets': None,  # Total Assets
+            
+            # Current Liabilities
+            'Accounts Payable': 'Current Liabilities',
+            'Accrued Liabilities': 'Current Liabilities',
+            'Accrued Expenses': 'Current Liabilities',
+            'Deferred Revenue': 'Current Liabilities',
+            'Short-Term Debt': 'Current Liabilities',
+            'Other Current Liabilities': 'Current Liabilities',
+            'Current Liabilities': None,  # Subtotal
+            
+            # Non-Current Liabilities
+            'Long-Term Debt': 'Non-Current Liabilities',
+            'Deferred Tax Liabilities': 'Non-Current Liabilities',
+            'Other Non-Current Liabilities': 'Non-Current Liabilities',
+            'Non-Current Liabilities': None,  # Subtotal
+            
+            'Total Liabilities': None,  # Total Liabilities
+            
+            # Stockholders' Equity
+            'Common Stock': 'Stockholders\' Equity',
+            'Preferred Stock': 'Stockholders\' Equity',
+            'Additional Paid-In Capital': 'Stockholders\' Equity',
+            'Retained Earnings': 'Stockholders\' Equity',
+            'Accumulated Other Comprehensive Income': 'Stockholders\' Equity',
+            'Treasury Stock': 'Stockholders\' Equity',
+            'Stockholders\' Equity': None,  # Subtotal
+            
+            # Calculated metrics
+            'Working Capital': None,
+            'Total Debt': None,
+            
+            # Cash Flow Statement - Standard format
+            # Operating Activities
+            'Net Income': None,  # Starting point
+            'Depreciation & Amortization': 'Operating Adjustments',
+            'Stock-Based Compensation': 'Operating Adjustments',
+            'Deferred Income Taxes': 'Operating Adjustments',
+            'Operating Adjustments': None,  # Subtotal
+            
+            # Changes in Working Capital
+            'Change in Accounts Receivable': 'Working Capital Changes',
+            'Change in Inventory': 'Working Capital Changes',
+            'Change in Accounts Payable': 'Working Capital Changes',
+            'Change in Deferred Revenue': 'Working Capital Changes',
+            'Change in Other Working Capital': 'Working Capital Changes',
+            'Working Capital Changes': None,  # Subtotal
+            
+            'Other Operating Activities': 'Operating Activities',
+            'Operating Activities': None,  # Subtotal
+            'Net Cash from Operating Activities': None,  # Total
+            
+            # Investing Activities
+            'Capital Expenditures': 'Investing Activities',
+            'Acquisitions': 'Investing Activities',
+            'Investments': 'Investing Activities',
+            'Proceeds from Investment Sales': 'Investing Activities',
+            'Proceeds from Asset Sales': 'Investing Activities',
+            'Other Investing Activities': 'Investing Activities',
+            'Investing Activities': None,  # Subtotal
+            'Net Cash from Investing Activities': None,  # Total
+            
+            # Financing Activities
+            'Proceeds from Debt': 'Financing Activities',
+            'Repayments of Debt': 'Financing Activities',
+            'Dividends Paid': 'Financing Activities',
+            'Stock Repurchases': 'Financing Activities',
+            'Proceeds from Stock Issuance': 'Financing Activities',
+            'Other Financing Activities': 'Financing Activities',
+            'Financing Activities': None,  # Subtotal
+            'Net Cash from Financing Activities': None,  # Total
+            
+            # Net Change and Ending Balance
+            'Effect of Exchange Rate Changes': None,
+            'Net Change in Cash': None,  # Final total
+            'Cash at Beginning of Period': None,
+            'Cash at End of Period': None
+        }
+
 # Example usage and testing
 if __name__ == "__main__":
     sourcer = SECFileSourcer()
@@ -2411,4 +3344,4 @@ if __name__ == "__main__":
             excel_file = sourcer.export_to_excel(financial_model, sensitivity_model, ticker)
             print(f"\nModel creation complete! Check the Excel file: {excel_file}")
         else:
-            print("\nNo financial data was successfully pulled. Excel file will not be created.") 
+            print("\nNo financial data was successfully pulled. Excel file will not be created.")
