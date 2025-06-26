@@ -1153,31 +1153,32 @@ class SECFileSourcer:
         
         # Define the order and structure for each statement with proper parent-child relationships
         income_order = [
-            ('Revenue', None),
-            ('CostOfGoodsSold', 'Revenue'),
-            ('GrossProfit', None),
-            ('ResearchAndDevelopmentExpense', 'Operating Expenses'),
-            ('SellingGeneralAndAdministrativeExpense', 'Operating Expenses'),
-            ('DepreciationAndAmortization', 'Operating Expenses'),
-            ('StockBasedCompensationExpense', 'Operating Expenses'),
-            ('RestructuringCharges', 'Operating Expenses'),
-            ('ImpairmentCharges', 'Operating Expenses'),
-            ('OtherOperatingExpenses', 'Operating Expenses'),
-            ('OperatingExpenses', None),  # subtotal
-            ('OperatingIncome', None),  # total
-            ('InterestIncome', 'Non-Operating Income'),
-            ('InterestExpense', 'Non-Operating Income'),
-            ('GainLossOnSaleOfAssets', 'Non-Operating Income'),
-            ('ForeignCurrencyGainLoss', 'Non-Operating Income'),
-            ('OtherIncomeExpense', 'Non-Operating Income'),
-            ('NonOperatingIncome', None),  # subtotal
-            ('IncomeBeforeTaxes', None),
-            ('IncomeTaxExpense', 'Income Before Taxes'),
-            ('NetIncome', None),
-            ('EarningsPerShareBasic', 'Net Income'),
-            ('EarningsPerShareDiluted', 'Net Income'),
-            ('WeightedAverageSharesBasic', 'Net Income'),
-            ('WeightedAverageSharesDiluted', 'Net Income'),
+            # Income Statement Section Heading
+            ('Income Statement', None),  # Section heading
+            
+            # Revenues Subheading
+            ('Revenues', None),  # Subheading title
+            ('Revenue Stream One', 'Revenues'),  # Child of Revenues
+            ('Revenue Stream Two', 'Revenues'),  # Child of Revenues
+            ('Total Revenues', 'Revenues'),  # Subtotal of Revenues
+            
+            # OpEx Subheading
+            ('OpEx', None),  # Subheading title
+            ('Cost of Goods Sold', 'OpEx'),  # Child of OpEx
+            ('SG&A', 'OpEx'),  # Child of OpEx
+            ('Misc', 'OpEx'),  # Child of OpEx
+            ('Total OpEx', 'OpEx'),  # Subtotal of OpEx
+            
+            # EBITDA (Total Revenues - Total OpEx)
+            ('EBITDA', None),  # Total Revenues - Total OpEx
+            
+            # Other expenses
+            ('Depreciation and Amortization', None),
+            ('Interest Expense', None),
+            ('Tax Expense', None),
+            
+            # Net Income (EBITDA - Depreciation and Amortization - Interest Expense - Tax Expense)
+            ('Net Income', None),  # EBITDA - Depreciation and Amortization - Interest Expense - Tax Expense
         ]
         balance_order = [
             ('CashAndCashEquivalents', 'Current Assets'),
@@ -2997,6 +2998,13 @@ class SECFileSourcer:
             'SalesRevenueServicesNet': 'Service Revenue',
             'SalesRevenueNetOfReturnsAndAllowances': 'Net Sales',
             
+            # New required line items
+            'Revenue Stream One': 'Revenue Stream One',
+            'Revenue Stream Two': 'Revenue Stream Two',
+            'Total Revenues': 'Total Revenues',
+            'OpEx': 'OpEx',
+            'EBITDA': 'EBITDA',
+            
             # Cost of Revenue
             'CostOfRevenue': 'Cost of Revenue',
             'CostOfGoodsAndServicesSold': 'Cost of Goods Sold',
@@ -3015,6 +3023,11 @@ class SECFileSourcer:
             'MarketingExpense': 'Marketing',
             'AdvertisingExpense': 'Advertising',
             'PromotionalExpense': 'Promotional',
+            
+            # SG&A and Misc
+            'SG&A': 'SG&A',
+            'Misc': 'Misc',
+            'Total OpEx': 'Total OpEx',
             
             # Depreciation and Amortization
             'DepreciationAndAmortization': 'Depreciation & Amortization',
@@ -3073,12 +3086,14 @@ class SECFileSourcer:
             'CurrentIncomeTaxExpense': 'Current Income Tax',
             'DeferredIncomeTaxExpense': 'Deferred Income Tax',
             'EffectiveIncomeTaxRateReconciliation': 'Effective Tax Rate',
+            'Tax Expense': 'Tax Expense',
             
             # Net Income
             'NetIncomeLoss': 'Net Income',
             'NetIncomeLossAvailableToCommonStockholdersBasic': 'Net Income Available to Common',
             'NetIncomeLossAttributableToParent': 'Net Income Attributable to Parent',
             'NetIncomeLossAttributableToNoncontrollingInterest': 'Net Income Attributable to Noncontrolling Interest',
+            'Net Income': 'Net Income',
             
             # Earnings Per Share
             'EarningsPerShareBasic': 'EPS (Basic)',
@@ -3523,7 +3538,29 @@ class SECFileSourcer:
             'Effect of Exchange Rate Changes': None,
             'Net Change in Cash': None,  # Final total
             'Cash at Beginning of Period': None,
-            'Cash at End of Period': None
+            'Cash at End of Period': None,
+            
+            # Income Statement - New required format
+            'Income Statement': None,  # Section heading
+            'Revenues': None,  # Subheading title
+            'Revenue Stream One': 'Revenues',  # Child of Revenues
+            'Revenue Stream Two': 'Revenues',  # Child of Revenues
+            'Total Revenues': 'Revenues',  # Subtotal of Revenues
+            'OpEx': None,  # Subheading title
+            'Cost of Goods Sold': 'OpEx',  # Child of OpEx
+            'SG&A': 'OpEx',  # Child of OpEx
+            'Misc': 'OpEx',  # Child of OpEx
+            'Total OpEx': 'OpEx',  # Subtotal of OpEx
+            'EBITDA': None,  # Total Revenues - Total OpEx
+            'Depreciation and Amortization': None,
+            'Interest Expense': None,
+            'Tax Expense': None,
+            'Net Income': None,  # EBITDA - Depreciation and Amortization - Interest Expense - Tax Expense
+            
+            # Legacy mappings for backward compatibility
+            'Revenue': None,  # Top level
+            'Cost of Revenue': 'Revenue',
+            'Gross Profit': None,  # Calculated total
         }
 
     def _remove_empty_columns(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -4008,44 +4045,50 @@ class SECFileSourcer:
         import numpy as np
         # Define required line items and their order
         required_order = [
-            # Revenue section
-            'Revenue',
-            'Product Revenue',
-            'Service Revenue',
-            'Total revenue',
-            # Operating expenses
-            'Operating expenses',
-            'Cost of Goods Sold',
-            'Corporate Expenses',
-            'SG&A',
-            # Other Expenses
-            'Other Expenses',
-            'Operating Income (EBITDA)',
+            # Income Statement Section Heading
+            'Income Statement',  # Section heading
+            
+            # Revenues Subheading
+            'Revenues',  # Subheading title
+            'Revenue Stream One',  # Child of Revenues
+            'Revenue Stream Two',  # Child of Revenues
+            'Total Revenues',  # Subtotal of Revenues
+            
+            # OpEx Subheading
+            'OpEx',  # Subheading title
+            'Cost of Goods Sold',  # Child of OpEx
+            'SG&A',  # Child of OpEx
+            'Misc',  # Child of OpEx
+            'Total OpEx',  # Subtotal of OpEx
+            
+            # EBITDA (Total Revenues - Total OpEx)
+            'EBITDA',  # Total Revenues - Total OpEx
+            
+            # Other expenses
             'Depreciation and Amortization',
             'Interest Expense',
             'Tax Expense',
-            'Net Income',
-            'EPS (Basic)',
-            'EPS (Diluted)'
+            
+            # Net Income (EBITDA - Depreciation and Amortization - Interest Expense - Tax Expense)
+            'Net Income',  # EBITDA - Depreciation and Amortization - Interest Expense - Tax Expense
         ]
         # Parent/section mapping for indentation/formatting
         parent_map = {
-            'Product Revenue': 'Revenue',
-            'Service Revenue': 'Revenue',
-            'Total revenue': 'Revenue',
-            'Cost of Goods Sold': 'Operating expenses',
-            'Corporate Expenses': 'Operating expenses',
-            'SG&A': 'Operating expenses',
-            'Operating expenses': None,
-            'Other Expenses': None,
-            'Depreciation and Amortization': 'Other Expenses',
-            'Interest Expense': 'Other Expenses',
-            'Tax Expense': 'Other Expenses',
-            'Operating Income (EBITDA)': None,
+            'Revenue Stream One': 'Revenues',
+            'Revenue Stream Two': 'Revenues',
+            'Total Revenues': 'Revenues',
+            'Cost of Goods Sold': 'OpEx',
+            'SG&A': 'OpEx',
+            'Misc': 'OpEx',
+            'Total OpEx': 'OpEx',
+            'Revenues': None,
+            'OpEx': None,
+            'EBITDA': None,
+            'Depreciation and Amortization': None,
+            'Interest Expense': None,
+            'Tax Expense': None,
             'Net Income': None,
-            'EPS (Basic)': 'Net Income',
-            'EPS (Diluted)': 'Net Income',
-            'Revenue': None
+            'Income Statement': None
         }
         # Create a new DataFrame with all required rows
         new_rows = []

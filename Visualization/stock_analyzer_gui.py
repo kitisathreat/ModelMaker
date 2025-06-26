@@ -717,23 +717,24 @@ class RedTintOverlay(QWidget):
             # Scale to max 0.8 opacity for CPU < 95%
             base_opacity = min(0.8, base_opacity)
         
-        # Create red tint color with calculated opacity
-        red_tint = QColor(255, 0, 0, int(255 * base_opacity))
-        
-        # Fill the entire widget with the red tint
-        painter.fillRect(self.rect(), red_tint)
-        
         # Create exclusion zone around mouse cursor with 100% transparency
         if base_opacity > 0 and self.mouse_in_window:
             # Create a circular path for the exclusion zone
             exclusion_path = QPainterPath()
             exclusion_path.addEllipse(self.mouse_pos, self.exclusion_radius, self.exclusion_radius)
             
-            # Set composition mode to clear the exclusion zone completely
-            painter.setCompositionMode(QPainter.CompositionMode_Clear)
+            # Create a mask that excludes the circular area
+            mask = QPainterPath()
+            mask.addRect(self.rect())
+            mask = mask.subtracted(exclusion_path)
             
-            # Clear the circular area around the mouse to 100% transparency
-            painter.fillPath(exclusion_path, QColor(0, 0, 0, 0))  # Fully transparent black
+            # Fill the masked area with red tint
+            red_tint = QColor(255, 0, 0, int(255 * base_opacity))
+            painter.fillPath(mask, red_tint)
+        else:
+            # Fill the entire widget with the red tint if no exclusion needed
+            red_tint = QColor(255, 0, 0, int(255 * base_opacity))
+            painter.fillRect(self.rect(), red_tint)
         
         painter.end()
     
