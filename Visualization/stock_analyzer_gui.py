@@ -627,71 +627,67 @@ class WavyLabel(QWidget):
         if self.width() < min_width:
             self.setFixedWidth(min_width)
 
-class FlamesWidget(QWidget):
+class RedTintOverlay(QWidget):
+    """Overlay widget that applies a red tint to the entire window with opacity tied to CPU usage."""
+    
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(80)
-        self.t = 0
         self.cpu_percent = 0
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.animate)
-        self.timer.start(60)
+        self.timer.timeout.connect(self.update_cpu_usage)
+        self.timer.start(100)  # Update every 100ms
         self.setVisible(False)
+        
+        # Set up the overlay to cover the entire parent window
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # Don't block mouse events
+        self.setAttribute(Qt.WA_NoSystemBackground)  # Transparent background
+        self.setAttribute(Qt.WA_TranslucentBackground)  # Allow transparency
+        
         try:
             import psutil
             self.psutil = psutil
         except ImportError:
             self.psutil = None
-        self.rng = np.random.default_rng()
-        self.flame_seeds = [self.rng.integers(0, 10000) for _ in range(20)]
-    def animate(self):
-        self.t += 1
+    
+    def update_cpu_usage(self):
+        """Update CPU usage percentage."""
         if self.psutil:
             self.cpu_percent = self.psutil.cpu_percent(interval=None)
         else:
             self.cpu_percent = 0
         self.update()
+    
     def paintEvent(self, event):
+        """Paint the red tint overlay."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        w = self.width()
-        h = self.height()
-        n_flames = 12
-        scale = 0.5 + 1.5 * (self.cpu_percent / 100.0)
-        for i in range(n_flames):
-            x = int(w * (i + 0.5) / n_flames)
-            base = h - 10
-            # Multi-spike flame
-            n_spikes = self.rng.integers(2, 5)
-            spike_offsets = np.linspace(-10, 10, n_spikes)
-            spike_heights = [scale * (38 + 18 * np.sin(self.t/3 + i + s + np.sin(self.t/7 + i))) for s in spike_offsets]
-            tip_wiggles = [8 * np.sin(self.t/5 + i + s) for s in spike_offsets]
-            path = QPainterPath()
-            path.moveTo(x, base)
-            # Blue/white core at base
-            grad_core = QLinearGradient(x, base, x, base-10)
-            grad_core.setColorAt(0, QColor(80, 180, 255))
-            grad_core.setColorAt(1, QColor(255, 255, 255))
-            painter.setBrush(QBrush(grad_core))
-            painter.setPen(Qt.NoPen)
-            painter.drawEllipse(x-6, base-10, 12, 12)
-            # Main flame path
-            path.lineTo(x-10, base-10)
-            for j, (dx, h_spike, wiggle) in enumerate(zip(spike_offsets, spike_heights, tip_wiggles)):
-                px = x + dx
-                py = base - h_spike + wiggle
-                path.lineTo(px, py)
-            path.lineTo(x+10, base-10)
-            path.lineTo(x, base)
-            grad = QLinearGradient(x, base, x, base-max(spike_heights))
-            grad.setColorAt(0, QColor(255, 255, 180))
-            grad.setColorAt(0.2, QColor(255, 220, 40))
-            grad.setColorAt(0.6, QColor(255, 140, 0))
-            grad.setColorAt(1, QColor(255, 60, 0))
-            painter.setBrush(QBrush(grad))
-            painter.setPen(Qt.NoPen)
-            painter.drawPath(path)
+        
+        # Calculate opacity based on CPU usage (0-100% CPU = 0-0.6 opacity)
+        opacity = min(0.6, self.cpu_percent / 100.0 * 0.6)
+        
+        # Create red tint color with calculated opacity
+        red_tint = QColor(255, 0, 0, int(255 * opacity))
+        
+        # Fill the entire widget with the red tint
+        painter.fillRect(self.rect(), red_tint)
+        
         painter.end()
+    
+    def showEvent(self, event):
+        """Handle show event to ensure overlay covers the entire parent window."""
+        super().showEvent(event)
+        self.resize_to_parent()
+    
+    def resizeEvent(self, event):
+        """Handle resize events to maintain full coverage."""
+        super().resizeEvent(event)
+        self.resize_to_parent()
+    
+    def resize_to_parent(self):
+        """Resize the overlay to cover the entire parent window."""
+        if self.parent():
+            parent_rect = self.parent().rect()
+            self.setGeometry(parent_rect)
 
 class StockAnalyzerGUI(QMainWindow):
     """Main application window for the Stock Analyzer."""
@@ -727,12 +723,18 @@ class StockAnalyzerGUI(QMainWindow):
         # Results section with splitter
         self.create_results_section(main_layout)
         
-        # Add flames widget at the bottom
-        self.flames = FlamesWidget()
-        main_layout.addWidget(self.flames)
+        # Create red tint overlay as a child of the central widget
+        self.red_tint_overlay = RedTintOverlay(central_widget)
+        self.red_tint_overlay.raise_()  # Ensure it's on top
         
         # Status bar
         self.statusBar().showMessage("Ready to analyze stocks")
+    
+    def resizeEvent(self, event):
+        """Handle window resize events to ensure red tint overlay covers the entire window."""
+        super().resizeEvent(event)
+        if hasattr(self, 'red_tint_overlay') and self.red_tint_overlay.isVisible():
+            self.red_tint_overlay.resize_to_parent()
     
     def create_input_section(self, parent_layout):
         """Create the input section for stock ticker and period configuration."""
@@ -1063,7 +1065,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.status_text.clear()
         
         # Show flames if schmoove mode
-        self.flames.setVisible(schmoove_mode)
+        self.red_tint_overlay.setVisible(schmoove_mode)
         
         # Create and start worker thread
         self.worker = AnalysisWorker(ticker, quarters, schmoove_mode=schmoove_mode, enhanced_fuzzy_matching=enhanced_fuzzy_matching, fast_preview=fast_preview)
@@ -1098,7 +1100,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.progress_bar.setVisible(False)
         
         # Hide flames
-        self.flames.setVisible(False)
+        self.red_tint_overlay.setVisible(False)
         
         # Display results
         self.display_results()
@@ -1120,7 +1122,7 @@ class StockAnalyzerGUI(QMainWindow):
         self.progress_bar.setVisible(False)
         
         # Hide flames
-        self.flames.setVisible(False)
+        self.red_tint_overlay.setVisible(False)
         
         # Show error message
         QMessageBox.critical(self, "Analysis Error", error_message)

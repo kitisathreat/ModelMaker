@@ -8,8 +8,8 @@ This script provides an easy way to run the GUI application from the project roo
 import sys
 import os
 
-# Add the Visualization directory to the path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'Visualization'))
+# Add the Data Sourcing directory to the path for the SECFileSourcer import
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Data Sourcing'))
 
 def main():
     """Launch the GUI application."""

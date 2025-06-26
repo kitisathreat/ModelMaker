@@ -866,45 +866,112 @@ class SECFileSourcer:
         else:
             n_jobs = 1
         
-        # Parent-child mapping for indentation following standard three-statement modeling
-        parent_map = self._create_user_friendly_parent_map()
+        # Open the workbook
+        wb = openpyxl.load_workbook(filepath)
         
         # Format annual and quarterly sheets
         for sheet in ['Annual Financial Statements', 'Quarterly Financial Statements']:
             if sheet in wb.sheetnames:
                 ws = wb[sheet]
+                
+                # Find the Line Item column
+                line_item_col = None
+                for idx, cell in enumerate(ws[1]):
+                    if cell.value == 'Line Item':
+                        line_item_col = idx + 1
+                        break
+                
+                if line_item_col is None:
+                    continue
+                
                 # Bold headers
                 for row in ws.iter_rows(min_row=1, max_row=1):
                     for cell in row:
                         cell.font = Font(bold=True)
-                # Indent and bold parent categories (if present)
-                def format_row(row):
-                    line_item_cell = row[0]
-                    if line_item_cell.value in parent_map:
-                        parent = parent_map[line_item_cell.value]
-                        if parent is None:
-                            line_item_cell.font = Font(bold=True)
-                        else:
-                            indent_level = 1
-                            p = parent
-                            while p:
-                                indent_level += 1
-                                p = parent_map.get(p)
-                            line_item_cell.alignment = Alignment(indent=indent_level)
                 
-                rows = list(ws.iter_rows(min_row=2))
+                # Apply formatting to each row
+                def format_row(row_num):
+                    line_item_cell = ws.cell(row=row_num, column=line_item_col)
+                    line_item_value = line_item_cell.value
+                    
+                    if line_item_value is None:
+                        return
+                    
+                    # Bold section headings (INCOME STATEMENT, BALANCE SHEET, CASH FLOW STATEMENT)
+                    if line_item_value in ['INCOME STATEMENT', 'BALANCE SHEET', 'CASH FLOW STATEMENT']:
+                        line_item_cell.font = Font(bold=True, size=12)
+                        line_item_cell.alignment = Alignment(horizontal='left')
+                        return
+                    
+                    # Determine if this is an aggregate/total line item
+                    is_aggregate = False
+                    indent_level = 0
+                    
+                    # Check if it's an aggregate based on the line item name
+                    aggregate_keywords = ['total', 'net', 'gross', 'income', 'earnings', 'operating income', 'cash at end']
+                    if any(keyword in line_item_value.lower() for keyword in aggregate_keywords):
+                        is_aggregate = True
+                    
+                    # Determine indent level based on parent-child relationships
+                    parent_map = self._create_user_friendly_parent_map()
+                    
+                    # Find the technical concept name for this friendly title
+                    technical_concept = None
+                    for tech_name, friendly_name in self._create_user_friendly_title_mapping().items():
+                        if friendly_name == line_item_value:
+                            technical_concept = tech_name
+                            break
+                    
+                    if technical_concept and technical_concept in parent_map:
+                        parent = parent_map[technical_concept]
+                        if parent is not None:
+                            indent_level = 1
+                            # Check if parent has a parent (for deeper nesting)
+                            if parent in parent_map and parent_map[parent] is not None:
+                                indent_level = 2
+                    
+                    # Apply formatting
+                    if is_aggregate and indent_level == 0:
+                        # Bold and italic for main totals
+                        line_item_cell.font = Font(bold=True, italic=True)
+                    elif is_aggregate:
+                        # Just italic for subtotals
+                        line_item_cell.font = Font(italic=True)
+                    elif indent_level > 0:
+                        # Regular font with indentation for subcategories
+                        line_item_cell.font = Font()
+                        line_item_cell.alignment = Alignment(indent=indent_level)
+                    else:
+                        # Regular font for main line items
+                        line_item_cell.font = Font()
+                
+                # Apply formatting to all rows
+                rows = list(range(2, ws.max_row + 1))
                 if schmoove_mode and n_jobs > 1:
                     progress("    • Applying formatting with parallel processing...")
                     try:
                         from joblib import Parallel, delayed
-                        Parallel(n_jobs=n_jobs)(delayed(format_row)(row) for row in rows)
+                        Parallel(n_jobs=n_jobs)(delayed(format_row)(row_num) for row_num in rows)
                     except ImportError:
                         # Fallback to sequential processing
-                        for row in rows:
-                            format_row(row)
+                        for row_num in rows:
+                            format_row(row_num)
                 else:
-                    for row in rows:
-                        format_row(row)
+                    for row_num in rows:
+                        format_row(row_num)
+                
+                # Auto-adjust column widths
+                for column in ws.columns:
+                    max_length = 0
+                    column_letter = openpyxl.utils.get_column_letter(column[0].column)
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    ws.column_dimensions[column_letter].width = adjusted_width
         
         # Save the formatted workbook
         progress("    • Saving formatted Excel file...")
@@ -1006,35 +1073,92 @@ class SECFileSourcer:
         # Now open with openpyxl and apply formatting
         progress("    • Applying professional formatting...")
         wb = openpyxl.load_workbook(filepath)
+        
         # Format annual and quarterly sheets
         for sheet in ['Annual Financial Statements', 'Quarterly Financial Statements']:
             if sheet in wb.sheetnames:
                 ws = wb[sheet]
-                # Find column indices for formatting metadata
-                col_map = {cell.value: idx+1 for idx, cell in enumerate(ws[1])}
-                line_item_col = col_map.get('Line Item', 1)
-                is_section_heading_col = col_map.get('is_section_heading')
-                is_aggregate_col = col_map.get('is_aggregate')
-                indent_level_col = col_map.get('indent_level')
-                # Format each row
-                for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-                    cell = row[line_item_col-1]
-                    is_section = row[is_section_heading_col-1].value if is_section_heading_col else False
-                    is_agg = row[is_aggregate_col-1].value if is_aggregate_col else False
-                    indent = row[indent_level_col-1].value if indent_level_col else 0
-                    # Bold section headings
-                    if is_section:
-                        cell.font = Font(bold=True)
-                    # Italicize aggregates/totals
-                    if is_agg and not is_section:
-                        cell.font = Font(italic=True)
-                    # Indent subcategories
-                    if indent and not is_section:
-                        cell.alignment = Alignment(indent=int(indent))
-                # Hide formatting metadata columns
-                for meta_col in [is_section_heading_col, is_aggregate_col, indent_level_col]:
-                    if meta_col:
-                        ws.column_dimensions[openpyxl.utils.get_column_letter(meta_col)].hidden = True
+                
+                # Find the Line Item column
+                line_item_col = None
+                for idx, cell in enumerate(ws[1]):
+                    if cell.value == 'Line Item':
+                        line_item_col = idx + 1
+                        break
+                
+                if line_item_col is None:
+                    continue
+                
+                # Apply formatting to each row
+                for row_num in range(2, ws.max_row + 1):
+                    line_item_cell = ws.cell(row=row_num, column=line_item_col)
+                    line_item_value = line_item_cell.value
+                    
+                    if line_item_value is None:
+                        continue
+                    
+                    # Bold section headings (INCOME STATEMENT, BALANCE SHEET, CASH FLOW STATEMENT)
+                    if line_item_value in ['INCOME STATEMENT', 'BALANCE SHEET', 'CASH FLOW STATEMENT']:
+                        line_item_cell.font = Font(bold=True, size=12)
+                        line_item_cell.alignment = Alignment(horizontal='left')
+                        continue
+                    
+                    # Determine if this is an aggregate/total line item
+                    is_aggregate = False
+                    indent_level = 0
+                    
+                    # Check if it's an aggregate based on the line item name
+                    aggregate_keywords = ['total', 'net', 'gross', 'income', 'earnings', 'operating income', 'cash at end']
+                    if any(keyword in line_item_value.lower() for keyword in aggregate_keywords):
+                        is_aggregate = True
+                    
+                    # Determine indent level based on parent-child relationships
+                    # This is a simplified approach - in practice, you might want to use the parent_map
+                    parent_map = self._create_user_friendly_parent_map()
+                    
+                    # Find the technical concept name for this friendly title
+                    technical_concept = None
+                    for tech_name, friendly_name in self._create_user_friendly_title_mapping().items():
+                        if friendly_name == line_item_value:
+                            technical_concept = tech_name
+                            break
+                    
+                    if technical_concept and technical_concept in parent_map:
+                        parent = parent_map[technical_concept]
+                        if parent is not None:
+                            indent_level = 1
+                            # Check if parent has a parent (for deeper nesting)
+                            if parent in parent_map and parent_map[parent] is not None:
+                                indent_level = 2
+                    
+                    # Apply formatting
+                    if is_aggregate and indent_level == 0:
+                        # Bold and italic for main totals
+                        line_item_cell.font = Font(bold=True, italic=True)
+                    elif is_aggregate:
+                        # Just italic for subtotals
+                        line_item_cell.font = Font(italic=True)
+                    elif indent_level > 0:
+                        # Regular font with indentation for subcategories
+                        line_item_cell.font = Font()
+                        line_item_cell.alignment = Alignment(indent=indent_level)
+                    else:
+                        # Regular font for main line items
+                        line_item_cell.font = Font()
+                
+                # Auto-adjust column widths
+                for column in ws.columns:
+                    max_length = 0
+                    column_letter = openpyxl.utils.get_column_letter(column[0].column)
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    ws.column_dimensions[column_letter].width = adjusted_width
+        
         # Save the formatted workbook
         progress("    • Saving formatted Excel file...")
         wb.save(filepath)
@@ -1044,8 +1168,8 @@ class SECFileSourcer:
     def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
         """
         Create a vertically stacked financial statement with proper formatting following standard three-statement modeling principles.
-        Adds section headings, indent levels, and aggregate markers for formatting.
-        Returns a DataFrame with extra columns for formatting.
+        Returns a clean DataFrame with line items and values, formatting will be applied directly in Excel.
+        Each unique line item appears only once per sheet, with different reporting periods as columns.
         """
         import pandas as pd
         
@@ -1114,7 +1238,7 @@ class SECFileSourcer:
             ('TotalDebt', None),
         ]
         cash_flow_order = [
-            ('NetIncome', None),
+            ('NetIncome', None),  # This will be consolidated with Income Statement Net Income
             ('DepreciationAndAmortization', 'OperatingAdjustments'),
             ('StockBasedCompensation', 'OperatingAdjustments'),
             ('DeferredIncomeTaxes', 'OperatingAdjustments'),
@@ -1148,41 +1272,78 @@ class SECFileSourcer:
             ('CashAtBeginningOfPeriod', None),
             ('CashAtEndOfPeriod', None),
         ]
-        # Helper to build section
+        
+        # Track processed line items to avoid duplicates
+        processed_line_items = set()
+        
+        # Helper to build section with consolidated line items
         def build_section(section_title, order, df):
             rows = []
+            
             # Insert section heading
-            rows.append({
+            section_row = {
                 'Line Item': section_title,
+                'statement_type': section_title.split()[0].upper(),  # INCOME, BALANCE, CASH
                 'is_section_heading': True,
-                'is_aggregate': False,
-                'indent_level': 0
-            })
+                'parent': None,
+                'is_aggregate': False
+            }
+            
+            # Add all available dates as columns to the section heading
+            if not df.empty:
+                for date in df.index:
+                    section_row[date] = ''  # Empty values for section headings
+            
+            rows.append(section_row)
+            
+            # Process each line item in order
             for item, parent in order:
                 if item in df.columns:
+                    # Convert technical concept name to user-friendly title
+                    friendly_title = self._get_user_friendly_title(item)
+                    
+                    # Handle duplicate line items that appear in multiple statements
+                    # For Net Income, we want to keep it in the Income Statement and skip it in Cash Flow
+                    if friendly_title == 'Net income' and section_title == 'CASH FLOW STATEMENT':
+                        # Skip Net Income in Cash Flow Statement since it's already in Income Statement
+                        continue
+                    
+                    # Check if this line item has already been processed
+                    if friendly_title in processed_line_items:
+                        # Skip duplicates
+                        continue
+                    
+                    is_aggregate = (parent is None and 
+                                  (item.lower().startswith('total') or 
+                                   'Net' in item or 'Gross' in item or 
+                                   'Income' in item or 'Earnings' in item or 
+                                   'OperatingIncome' in item or 
+                                   'CashAtEndOfPeriod' == item))
+                    
+                    # Create a single row for this line item
+                    row = {
+                        'Line Item': friendly_title,
+                        'statement_type': section_title.split()[0].upper(),
+                        'is_section_heading': False,
+                        'parent': parent,
+                        'is_aggregate': is_aggregate
+                    }
+                    
+                    # Add values for each period as columns
                     for date in df.index:
-                        # Convert technical concept name to user-friendly title
-                        friendly_title = self._get_user_friendly_title(item)
-                        row = {
-                            'Line Item': friendly_title,
-                            'is_section_heading': False,
-                            'is_aggregate': parent is None and item.lower().startswith('total') or 'Net' in item or 'Gross' in item or 'Income' in item or 'Earnings' in item or 'OperatingIncome' in item or 'CashAtEndOfPeriod' == item,
-                            'indent_level': 0,
-                        }
-                        # Indent if has parent
-                        if parent:
-                            row['indent_level'] = 1
-                        # Add values for each period
-                        for col in df.columns:
-                            if col == item:
-                                row[date] = df.loc[date, item]
-                        rows.append(row)
+                        row[date] = df.loc[date, item]
+                    
+                    rows.append(row)
+                    processed_line_items.add(friendly_title)
+            
             return rows
+        
         # Build all sections
         rows = []
         rows += build_section('INCOME STATEMENT', income_order, income_df)
         rows += build_section('BALANCE SHEET', balance_order, balance_df)
         rows += build_section('CASH FLOW STATEMENT', cash_flow_order, cash_flow_df)
+        
         # Convert to DataFrame
         if rows:
             df = pd.DataFrame(rows)
@@ -2864,7 +3025,7 @@ class SECFileSourcer:
             # Earnings Per Share
             'EarningsPerShareBasic': 'EPS (Basic)',
             'EarningsPerShareDiluted': 'EPS (Diluted)',
-            'WeightedAverageNumberOfSharesOutstandingBasic': 'Weighted Average Shares (Basic)',
+            'WeightedAverageNumberOfSharesBasic': 'Weighted Average Shares (Basic)',
             'WeightedAverageNumberOfSharesOutstandingDiluted': 'Weighted Average Shares (Diluted)',
             
             # Balance Sheet - Current Assets
