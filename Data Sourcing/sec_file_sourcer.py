@@ -12,7 +12,13 @@ import re
 import numpy as np
 warnings.filterwarnings('ignore')
 
-from joblib import Parallel, delayed
+try:
+    from joblib import Parallel, delayed
+    JOBLIB_AVAILABLE = True
+except ImportError:
+    JOBLIB_AVAILABLE = False
+    Parallel = None
+    delayed = None
 try:
     from rapidfuzz import fuzz, process as rf_process
     RAPIDFUZZ_AVAILABLE = True
@@ -398,9 +404,18 @@ class SECFileSourcer:
                         elif period == 'quarterly' and period_data.get('form') in ['10-Q', '10-Q/A']:
                             filtered_periods.append(period_data)
                     
+                    # Dedup by end date: keep the latest amendment (highest 'filed' date)
+                    # so that 10-Q/A supersedes the original 10-Q for the same period.
+                    deduped: dict = {}
+                    for p in filtered_periods:
+                        end = p.get('end', '')
+                        if end not in deduped or p.get('filed', '') > deduped[end].get('filed', ''):
+                            deduped[end] = p
+                    filtered_periods = list(deduped.values())
+
                     # Sort by end date (most recent first)
                     filtered_periods.sort(key=lambda x: x.get('end', ''), reverse=True)
-                    
+
                     # Take the most recent periods based on the quarters parameter
                     # For annual data, limit to the number of years needed
                     # For quarterly data, limit to the actual quarters requested
@@ -792,18 +807,15 @@ class SECFileSourcer:
                 progress("    • Writing annual financial statements...")
                 startrow = 0
                 if not annual_income.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_annual_income = self._remove_empty_columns(annual_income.transpose())
+                    cleaned_annual_income = self._stringify_date_columns(self._remove_empty_columns(annual_income.transpose()))
                     cleaned_annual_income.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
                     startrow += annual_income.shape[1] + 3
                 if not annual_balance.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_annual_balance = self._remove_empty_columns(annual_balance.transpose())
+                    cleaned_annual_balance = self._stringify_date_columns(self._remove_empty_columns(annual_balance.transpose()))
                     cleaned_annual_balance.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
                     startrow += annual_balance.shape[1] + 3
                 if not annual_cash_flow.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_annual_cash_flow = self._remove_empty_columns(annual_cash_flow.transpose())
+                    cleaned_annual_cash_flow = self._stringify_date_columns(self._remove_empty_columns(annual_cash_flow.transpose()))
                     cleaned_annual_cash_flow.to_excel(writer, sheet_name='Annual Financial Statements', startrow=startrow)
             
             # Quarterly sheet
@@ -814,18 +826,15 @@ class SECFileSourcer:
                 progress("    • Writing quarterly financial statements...")
                 startrow = 0
                 if not quarterly_income.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_quarterly_income = self._remove_empty_columns(quarterly_income.transpose())
+                    cleaned_quarterly_income = self._stringify_date_columns(self._remove_empty_columns(quarterly_income.transpose()))
                     cleaned_quarterly_income.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
                     startrow += quarterly_income.shape[1] + 3
                 if not quarterly_balance.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_quarterly_balance = self._remove_empty_columns(quarterly_balance.transpose())
+                    cleaned_quarterly_balance = self._stringify_date_columns(self._remove_empty_columns(quarterly_balance.transpose()))
                     cleaned_quarterly_balance.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
                     startrow += quarterly_balance.shape[1] + 3
                 if not quarterly_cash_flow.empty:
-                    # Remove empty columns before writing to Excel
-                    cleaned_quarterly_cash_flow = self._remove_empty_columns(quarterly_cash_flow.transpose())
+                    cleaned_quarterly_cash_flow = self._stringify_date_columns(self._remove_empty_columns(quarterly_cash_flow.transpose()))
                     cleaned_quarterly_cash_flow.to_excel(writer, sheet_name='Quarterly Financial Statements', startrow=startrow)
             
             # Sensitivity and summary sheets
@@ -1049,6 +1058,7 @@ class SECFileSourcer:
                 stacked_annual = self._remove_empty_columns(stacked_annual)
                 # Remove formatting columns before writing to Excel
                 stacked_annual = self._remove_formatting_columns(stacked_annual)
+                stacked_annual = self._stringify_date_columns(stacked_annual)
                 stacked_annual.to_excel(writer, sheet_name='Annual Financial Statements', index=False)
             # Quarterly sheet
             quarterly_income = financial_model.get('quarterly_income_statement', pd.DataFrame())
@@ -1061,6 +1071,7 @@ class SECFileSourcer:
                 stacked_quarterly = self._remove_empty_columns(stacked_quarterly)
                 # Remove formatting columns before writing to Excel
                 stacked_quarterly = self._remove_formatting_columns(stacked_quarterly)
+                stacked_quarterly = self._stringify_date_columns(stacked_quarterly)
                 stacked_quarterly.to_excel(writer, sheet_name='Quarterly Financial Statements', index=False)
             # Sensitivity and summary sheets
             progress("    • Writing sensitivity analysis and summary sheets...")
@@ -1068,6 +1079,7 @@ class SECFileSourcer:
                 if not df.empty:
                     # Remove empty columns before writing to Excel
                     cleaned_df = self._remove_empty_columns(df)
+                    cleaned_df = self._stringify_date_columns(cleaned_df)
                     cleaned_df.to_excel(writer, sheet_name=sheet_name.replace('_', ' ').title())
             # Summary sheet
             summary_data = {
@@ -1142,6 +1154,16 @@ class SECFileSourcer:
         wb.save(filepath)
         progress(f"    ✓ Excel file saved: {filepath}")
         return filepath
+
+    @staticmethod
+    def _stringify_date_columns(df: "pd.DataFrame") -> "pd.DataFrame":
+        """Convert any Timestamp column headers to 'YYYY-MM-DD' strings for Excel compatibility."""
+        import pandas as pd
+        new_cols = {
+            c: c.strftime('%Y-%m-%d') if hasattr(c, 'strftime') else c
+            for c in df.columns
+        }
+        return df.rename(columns=new_cols)
 
     def _create_vertically_stacked_statement(self, income_df, balance_df, cash_flow_df, period_type):
         """
@@ -2086,8 +2108,11 @@ class SECFileSourcer:
                         best_score = similarity
                         best_match = available_concept_str
             return (concept_name, best_match, best_score)
-        # Parallelize matching
-        results = Parallel(n_jobs=-1)(delayed(match_one)(concept_name, desired_tag) for concept_name, desired_tag in desired_concepts.items())
+        # Parallelize matching (fall back to sequential if joblib unavailable)
+        if JOBLIB_AVAILABLE:
+            results = Parallel(n_jobs=-1)(delayed(match_one)(concept_name, desired_tag) for concept_name, desired_tag in desired_concepts.items())
+        else:
+            results = [match_one(concept_name, desired_tag) for concept_name, desired_tag in desired_concepts.items()]
         for concept_name, best_match, best_score in results:
             if best_score >= similarity_threshold and best_match:
                 concept_mapping[concept_name] = best_match
@@ -2119,7 +2144,10 @@ class SECFileSourcer:
                             best_score = similarity
                             best_usgaap = usgaap_str
                 return (non_gaap_str, best_usgaap, best_score)
-            potential_mappings = Parallel(n_jobs=-1)(delayed(match_non_gaap)(non_gaap) for non_gaap in non_us_gaap_tags)
+            if JOBLIB_AVAILABLE:
+                potential_mappings = Parallel(n_jobs=-1)(delayed(match_non_gaap)(non_gaap) for non_gaap in non_us_gaap_tags)
+            else:
+                potential_mappings = [match_non_gaap(non_gaap) for non_gaap in non_us_gaap_tags]
             potential_mappings = [x for x in potential_mappings if x[1] and x[2] > 0.7]
             potential_mappings.sort(key=lambda x: x[2], reverse=True)
             top_mappings = potential_mappings[:20]
